@@ -95,6 +95,9 @@ export default function RealtimeClient() {
     aiTimestamp: Date;
     callback: () => void;
   }[]>([]);
+  
+  // Priority System: Prevent duplicate detection processing
+  const [functionCallDetected, setFunctionCallDetected] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
   
   // Taboo Game States
@@ -367,7 +370,7 @@ export default function RealtimeClient() {
   const handleTabooFunctionCall = (msg: any) => {
     if (msg.name === "taboo_guess_result") {
       const args = JSON.parse(msg.arguments || "{}");
-      console.log("🎯 Taboo function call:", args);
+      log.game("🎯 Taboo function call:", args);
       
       const { guessed_word, is_correct, confidence, action } = args;
       
@@ -709,13 +712,23 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
   }
 
   if (msg.type === "response.function_call_done") {
-    log.game("Function call:", msg.name);
-    handleTabooFunctionCall(msg);
+    log.game("🎯 ANA DETECTION: Function call geldi -", msg.name);
+    
+    if (!functionCallDetected) {
+      setFunctionCallDetected(true);
+      handleTabooFunctionCall(msg);
+      log.success("✅ Ana sistem işledi, backup susturuldu");
+    } else {
+      log.warn("⚠️ Ana sistem zaten çalıştı, duplicate engellendi");
+    }
   }
 
   // Response başladığında yeni AI mesajı başlat
   if (msg.type === "response.created") {
     setCurrentAssistantMessage(""); // Yeni response için temizle
+    // Priority System: Reset detection flag for new response
+    setFunctionCallDetected(false);
+    log.debug("🔄 Detection flag reset edildi");
   }
           
           // Kullanıcı konuşma başladı - VAD analizi için
@@ -889,9 +902,13 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
                   
                   const foundGuess = guessPatterns.some(pattern => aiText.includes(pattern));
                   
-                  if (foundGuess && gameRoundActive) {
-                    log.game("BACKUP: AI guessed correct word:", targetWord);
+                  if (foundGuess && gameRoundActive && !functionCallDetected) {
+                    log.game("🔄 BACKUP DETECTION: Pattern matching devrede -", targetWord);
+                    setFunctionCallDetected(true);
                     handleCorrectGuess(targetWord, 0.9);
+                    log.success("✅ Backup sistem işledi");
+                  } else if (foundGuess && functionCallDetected) {
+                    log.warn("❌ Backup susturuldu - ana sistem zaten çalıştı");
                   }
                 };
                 
