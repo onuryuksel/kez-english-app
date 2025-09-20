@@ -280,7 +280,7 @@ export default function RealtimeClient() {
       setRecentlyUnlocked(prev => prev.filter(w => w !== word));
     }, 3000);
     
-    // AI'a unlock durumunu bildir
+    // AI'a unlock durumunu bildir - but don't treat as final answer
     if (dcRef.current?.readyState === "open") {
       dcRef.current.send(JSON.stringify({
         type: "conversation.item.create",
@@ -289,13 +289,13 @@ export default function RealtimeClient() {
           role: "user",
           content: [{ 
             type: "input_text", 
-            text: `🔓 GREAT! You just said "${word}" which was forbidden, so now it's UNLOCKED! Kez can use "${word}" freely now. Continue guessing the word!` 
+            text: `System: AI correctly guessed forbidden word "${word}" - this unlocks it for Kez. This is NOT the final answer, just unlocking strategy. Wait for the main word.` 
           }]
         }
       }));
       
-      // Safe AI response request
-      createSafeResponse("Acknowledge that you said a forbidden word and it's now unlocked for Kez to use. Continue the game!");
+      // Safe AI response request - acknowledge unlock but don't celebrate as final
+      createSafeResponse(`Ah, you're unlocking "${word}"! Smart strategy, Kez. Ready for the main word?`);
     }
   };
   
