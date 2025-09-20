@@ -84,7 +84,7 @@ export default function RealtimeClient() {
   const [conversation, setConversation] = useState<ConversationMessage[]>([]);
   const [currentUserMessage, setCurrentUserMessage] = useState<string>("");
   const [currentAssistantMessage, setCurrentAssistantMessage] = useState<string>("");
-  const [messageSequence, setMessageSequence] = useState(0);
+  const messageSequenceRef = useRef(0);
   
   // Timeline fix: Buffer for proper ordering
   const [pendingUserMessage, setPendingUserMessage] = useState<{
@@ -268,8 +268,12 @@ export default function RealtimeClient() {
         log.warn(`🚫 Forbidden word detected: "${forbiddenWord}" by ${speaker}`);
         
         if (speaker === 'ai') {
-          // AI said forbidden word - unlock it!
-          unlockForbiddenWord(forbiddenWord);
+          // AI said forbidden word - unlock it! (but only if not already unlocked)
+          if (forbiddenWordStatus[forbiddenWord] !== 'unlocked') {
+            unlockForbiddenWord(forbiddenWord);
+          } else {
+            console.log(`🔓 Word "${forbiddenWord}" already unlocked - skipping - DEBUG`);
+          }
         } else {
           // User said forbidden word - game over for this round
           handleUserForbiddenWord(forbiddenWord);
@@ -282,10 +286,16 @@ export default function RealtimeClient() {
   const unlockForbiddenWord = (word: string) => {
     log.game(`Word unlocked: "${word}"`);
     
-    setForbiddenWordStatus(prev => ({
-      ...prev,
-      [word]: 'unlocked'
-    }));
+    setForbiddenWordStatus(prev => {
+      const newStatus = {
+        ...prev,
+        [word]: 'unlocked'
+      };
+      
+      // Debug log with updated status
+      console.log(`🔓 WORD UNLOCKED: "${word}" - New status: ${JSON.stringify(newStatus)} - DEBUG`);
+      return newStatus;
+    });
     
     // Animation için recently unlocked'a ekle
     setRecentlyUnlocked(prev => [...prev, word]);
@@ -628,6 +638,12 @@ export default function RealtimeClient() {
 
   // Safe Response Creation: Check if response is active before cancelling
   const createSafeResponse = (instructions: string, delay: number = 100) => {
+    // GAME PAUSE CHECK: Don't create responses when game is paused
+    if (!gameRoundActive && buzzerPopup.show) {
+      console.log("🚫 BLOCKED: Game paused, buzzer popup active - no AI response - DEBUG");
+      return;
+    }
+    
     if (dcRef.current?.readyState === "open") {
       // Only cancel if there's an active response (to prevent API errors)
       if (currentAssistantMessage) {
@@ -975,6 +991,28 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
     setCurrentUserMessage(""); // User message'ı da temizle - AI cevap veriyor
     // Priority System: Reset detection flag for new response
     setFunctionCallDetected(false);
+    
+    // REAL-TIME UI: Add AI message immediately (like console)
+    const aiTimestamp = new Date();
+    const currentSeq = messageSequenceRef.current;
+    messageSequenceRef.current += 1;
+    
+    const aiMessage = {
+      id: `ai-${aiTimestamp.getTime()}`,
+      role: "assistant" as const,
+      content: "🤖 Thinking...",
+      timestamp: aiTimestamp,
+      isComplete: false,
+      sequence: currentSeq
+    };
+    
+    // Add to conversation immediately (console-like behavior)
+    setConversation(prev => [...prev, aiMessage]);
+    console.log(`✅ AI MESSAGE ADDED IMMEDIATELY - Sequence: ${currentSeq} - DEBUG`);
+    
+    // Store reference for content update
+    aiMessage.id = `ai-${currentSeq}`; // Use sequence for consistent ID
+    
     log.debug("🔄 Detection flag reset edildi - User message cleared");
   }
           
@@ -996,21 +1034,26 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
               setTimeout(() => applyOptimalSettings(), 1000);
             }
             
-            // Timeline fix: Create placeholder for user message with early timestamp
+            // REAL-TIME UI: Add user message immediately (like console)
             const userTimestamp = new Date();
-            userTimestamp.setMilliseconds(userTimestamp.getMilliseconds() - 100); // Slightly before AI response
+            const currentSeq = messageSequenceRef.current;
+            messageSequenceRef.current += 1;
             
-            const currentSeq = messageSequence;
-            setMessageSequence(prev => prev + 1);
-            
-            setPendingUserMessage({
+            const userMessage = {
               id: `user-${userTimestamp.getTime()}`,
-              content: "", // Will be filled when transcript arrives
+              role: "user" as const,
+              content: "🎤 Speaking...",
               timestamp: userTimestamp,
+              isComplete: false,
               sequence: currentSeq
-            });
+            };
             
-            console.log(`🔍 Created user message placeholder - Sequence: ${currentSeq} - DEBUG`);
+            // Add to conversation immediately (console-like behavior)
+            setConversation(prev => [...prev, userMessage]);
+            console.log(`✅ USER MESSAGE ADDED IMMEDIATELY - Sequence: ${currentSeq} - DEBUG`);
+            
+            // Store reference for transcript update
+            setPendingUserMessage(userMessage);
           }
 
           // Kullanıcı konuşma transcript'i
@@ -1020,26 +1063,20 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
             setCurrentUserMessage(transcript);
             
             if (transcript) {
-              // Timeline fix: Use pending message with early timestamp and sequence (or create new)
-              const userMessage = {
-                id: pendingUserMessage?.id || `user-${Date.now()}`,
-                role: "user" as const,
-                content: transcript,
-                timestamp: pendingUserMessage?.timestamp || new Date(),
-                isComplete: true,
-                sequence: pendingUserMessage?.sequence ?? messageSequence
-              };
-              
-              // Taboo forbidden word kontrolü - Kez'in konuşması
-              checkForbiddenWords(transcript, 'user');
-              
-              setConversation(prev => {
-                const newConversation = [...prev, userMessage];
-                const timeStr = userMessage.timestamp.toLocaleTimeString();
-                console.log(`✅ KEZ MESSAGE ADDED: "${transcript}" [${timeStr}] - DEBUG`);
-                console.log(`✅ Conversation: ${newConversation.length} messages - DEBUG`);
-                return newConversation;
-              });
+              // REAL-TIME UI: Update existing user message with transcript
+              if (pendingUserMessage) {
+                setConversation(prev => prev.map(msg => 
+                  msg.id === pendingUserMessage.id 
+                    ? { ...msg, content: transcript, isComplete: true }
+                    : msg
+                ));
+                
+                const timeStr = pendingUserMessage.timestamp.toLocaleTimeString();
+                console.log(`✅ USER MESSAGE UPDATED: "${transcript}" [${timeStr}] - Sequence: ${pendingUserMessage.sequence} - DEBUG`);
+                
+                // Taboo forbidden word kontrolü - Kez'in konuşması
+                checkForbiddenWords(transcript, 'user');
+              }
               
               // Clear placeholder and current message
               setPendingUserMessage(null);
@@ -1113,28 +1150,17 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
             }
             
             if (aiMessageContent) {
-              // Timeline fix: Add AI message to conversation immediately (for UI) with sequence
-              const aiTimestamp = new Date();
-              const currentSeq = messageSequence;
-              setMessageSequence(prev => prev + 1);
+              // REAL-TIME UI: Update existing AI message with content
+              const currentSeq = messageSequenceRef.current - 1; // Last added AI message
               
-              setConversation(prev => {
-                // Add small offset to ensure unique timestamp  
-                aiTimestamp.setMilliseconds(aiTimestamp.getMilliseconds() + prev.length);
-                
-                const newConversation = [...prev, {
-                  id: `assistant-${aiTimestamp.getTime()}`,
-                  role: "assistant" as const, 
-                  content: aiMessageContent,
-                  timestamp: aiTimestamp,
-                  isComplete: true,
-                  sequence: currentSeq
-                }];
-                const timeStr = aiTimestamp.toLocaleTimeString();
-                console.log(`🎯 AI [${timeStr}]: "${aiMessageContent}" - DEBUG`);
-                console.log(`✅ AI message added. Total: ${newConversation.length} - DEBUG`);
-                return newConversation;
-              });
+              setConversation(prev => prev.map(msg => 
+                msg.role === "assistant" && !msg.isComplete && msg.sequence === currentSeq
+                  ? { ...msg, content: aiMessageContent, isComplete: true }
+                  : msg
+              ));
+              
+              const timeStr = new Date().toLocaleTimeString();
+              console.log(`✅ AI MESSAGE UPDATED: "${aiMessageContent}" [${timeStr}] - Sequence: ${currentSeq} - DEBUG`);
 
               // Timeline fix: Buffer game logic for when user transcript arrives
               if (gameMode === "taboo" && currentWord) {
@@ -1831,7 +1857,6 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
           )}
           
           {conversation
-            .sort((a, b) => a.sequence - b.sequence)
             .map((msg) => {
             // Taboo modunda AI'nin tahminlerini özel göster
             const isTabooGuess = gameMode === "taboo" && msg.role === "assistant" && 
