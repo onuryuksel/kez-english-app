@@ -844,11 +844,17 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
 
   return (
     <>
-      {/* CSS Animations */}
       <style jsx>{`
-        @keyframes buzzerShake {
-          0% { transform: translate(-50%, -50%) rotate(-2deg); }
-          100% { transform: translate(-50%, -50%) rotate(2deg); }
+        @keyframes shake {
+          0% { transform: translate(-50%, -50%) rotate(-1deg); }
+          25% { transform: translate(-50%, -50%) rotate(1deg); }
+          50% { transform: translate(-50%, -50%) rotate(-1deg); }
+          75% { transform: translate(-50%, -50%) rotate(1deg); }
+          100% { transform: translate(-50%, -50%) rotate(-1deg); }
+        }
+        
+        .buzzer-popup {
+          animation: shake 0.5s ease-in-out infinite;
         }
       `}</style>
       
@@ -1537,7 +1543,7 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
 
         {/* Buzzer Popup */}
         {buzzerPopup.show && (
-          <div style={{
+          <div className="buzzer-popup" style={{
             position: "fixed",
             top: "50%",
             left: "50%",
@@ -1551,8 +1557,7 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
             textAlign: "center",
             boxShadow: "0 20px 40px rgba(255, 71, 87, 0.4)",
             zIndex: 9999,
-            border: "3px solid white",
-            animation: "buzzerShake 0.5s ease-in-out infinite alternate"
+            border: "3px solid white"
           }}>
             <div style={{ fontSize: "48px", marginBottom: "10px" }}>🚨</div>
             <div>{buzzerPopup.message}</div>
