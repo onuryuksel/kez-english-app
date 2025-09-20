@@ -217,14 +217,21 @@ export default function RealtimeClient() {
           role: "user",
           content: [{ 
             type: "input_text", 
-            text: `BUZZER! Kez, you used the forbidden word "${word}". Let's try a new word!` 
+            text: `🚨 BUZZER! Kez used the forbidden word "${word}". Please tell her this was forbidden and we're moving to a new word. Be encouraging and stay in Taboo game mode!` 
           }]
         }
       }));
+      
+      // AI'dan response iste
+      dcRef.current.send(JSON.stringify({
+        type: "response.create"
+      }));
     }
     
-    // Yeni kelimeye geç
-    setTimeout(() => nextTabooWord(), 2000);
+    // Yeni kelimeye geç - AI'ın cevap vermesi için biraz bekle
+    setTimeout(() => {
+      getNewTabooWord();
+    }, 3000);
   };
 
   const getNewTabooWord = () => {
@@ -558,27 +565,32 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
           const msg = JSON.parse(ev.data);
           console.log("📨 Parsed message:", msg.type, msg);
           
-          // AI response event'lerini özellikle takip et
-          if (msg.type?.startsWith("response.")) {
-            console.log("🤖 AI Response Event:", msg.type, msg);
-          }
-          
-          // Error mesajlarını özellikle takip et
-          if (msg.type === "error") {
-            console.error("API Error received:", msg.error);
-            setStatus(`API Error: ${msg.error?.message || 'Unknown error'}`);
-            return;
-          }
+  // AI response event'lerini özellikle takip et
+  if (msg.type?.startsWith("response.")) {
+    console.log("🤖 AI Response Event:", msg.type, msg);
+  }
+  
+  // Error mesajlarını özellikle takip et
+  if (msg.type === "error") {
+    console.error("API Error received:", msg.error);
+    setStatus(`API Error: ${msg.error?.message || 'Unknown error'}`);
+    return;
+  }
 
-          // Function call handling - Taboo game functions 🎮
-          if (msg.type === "response.function_call_delta") {
-            console.log("🔧 Function call delta:", msg);
-          }
+  // Function call handling - Taboo game functions 🎮
+  if (msg.type === "response.function_call_delta") {
+    console.log("🔧 Function call delta:", msg);
+  }
 
-          if (msg.type === "response.function_call_done") {
-            console.log("🎯 Function call completed:", msg);
-            handleTabooFunctionCall(msg);
-          }
+  if (msg.type === "response.function_call_done") {
+    console.log("🎯 Function call completed:", msg);
+    handleTabooFunctionCall(msg);
+  }
+
+  // Response başladığında yeni AI mesajı başlat
+  if (msg.type === "response.created") {
+    setCurrentAssistantMessage(""); // Yeni response için temizle
+  }
           
           // Kullanıcı konuşma başladı - VAD analizi için
           if (msg?.type === "input_audio_buffer.speech_started") {
