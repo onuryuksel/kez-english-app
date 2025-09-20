@@ -170,7 +170,11 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
           },
           temperature: currentPace === "slow" ? 0.6 : currentPace === "fast" ? 1.0 : 0.8,
           modalities: ["audio", "text"], // Ensure both audio and text are enabled
-          output_audio_format: "pcm16"
+          output_audio_format: "pcm16",
+          input_audio_transcription: {
+            model: "whisper-1",
+            language: "en" // İngilizce transcription zorla
+          }
         }
       }));
     }
@@ -310,6 +314,12 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
           // Kullanıcı konuşma transcript'i
           if (msg?.type === "conversation.item.input_audio_transcription.completed") {
             const transcript = msg.transcript || "";
+            console.log("🎤 User transcript received:", {
+              transcript,
+              language: msg.language || "unknown",
+              confidence: msg.confidence || "unknown",
+              fullMessage: msg
+            });
             setCurrentUserMessage(transcript);
             if (transcript) {
               setConversation(prev => [...prev, {

@@ -29,9 +29,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         voice: "verse",                // (dokümandaki örnek seslerden biri)
         modalities: ["audio", "text"], // konuşma içeriği
         instructions: instructions,
-        // Transcription özelliğini etkinleştir
+        // Transcription özelliğini etkinleştir - İngilizce zorla
         input_audio_transcription: {
-          model: "whisper-1"
+          model: "whisper-1",
+          language: "en" // İngilizce transcription zorla
         },
         // Turn detection ve response ayarları
         turn_detection: { 
