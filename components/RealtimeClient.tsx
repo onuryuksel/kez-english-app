@@ -97,6 +97,7 @@ export default function RealtimeClient() {
     aiTimestamp: Date;
     callback: () => void;
   }[]>([]);
+  const processingGameLogicRef = useRef(false);
   
   // Priority System: Prevent duplicate detection processing
   const [functionCallDetected, setFunctionCallDetected] = useState(false);
@@ -1159,6 +1160,16 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
             }
             
             if (aiMessageContent) {
+              // DUPLICATE CHECK: Prevent processing same AI message multiple times
+              const isDuplicateMessage = conversation.some(msg => 
+                msg.role === "assistant" && msg.content === aiMessageContent && msg.isComplete
+              );
+              
+              if (isDuplicateMessage) {
+                console.log(`🔄 DUPLICATE AI MESSAGE PREVENTED: "${aiMessageContent.substring(0, 50)}..." - DEBUG`);
+                return; // Skip processing
+              }
+              
               // REAL-TIME UI: Update existing AI message with content
               const currentSeq = messageSequenceRef.current - 1; // Last added AI message
               
@@ -1216,6 +1227,14 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
                   
                   // SMART PROCESSING - Process immediately but prevent duplicates
                   setTimeout(() => {
+                    // PROCESSING FLAG: Prevent concurrent processing
+                    if (processingGameLogicRef.current) {
+                      console.log(`🔄 PROCESSING BLOCKED: Already processing game logic - DEBUG`);
+                      return;
+                    }
+                    
+                    processingGameLogicRef.current = true;
+                    
                     // Only process if this is the latest buffered item
                     setPendingGameLogic(current => {
                       if (current.length > 0) {
@@ -1224,8 +1243,18 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
                           console.log(`🔄 Processing item ${index + 1}: "${item.aiMessage.substring(0, 50)}..." - DEBUG`);
                           item.callback();
                         });
+                        
+                        // Reset processing flag after completion
+                        setTimeout(() => {
+                          processingGameLogicRef.current = false;
+                          console.log(`🔄 PROCESSING FLAG RESET - DEBUG`);
+                        }, 100);
+                        
                         return []; // Clear after processing
                       }
+                      
+                      // Reset flag if no items to process
+                      processingGameLogicRef.current = false;
                       return current;
                     });
                   }, 50);
