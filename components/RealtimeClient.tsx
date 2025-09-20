@@ -10,7 +10,7 @@ const LOG_LEVELS = {
   DEBUG: 3
 };
 
-const CURRENT_LOG_LEVEL = LOG_LEVELS.DEBUG; // Temporary DEBUG for forbidden word debugging
+const CURRENT_LOG_LEVEL = LOG_LEVELS.INFO; // Temporary DEBUG for forbidden word debugging
 
 const log = {
   error: (...args: any[]) => {
@@ -1070,7 +1070,6 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
           if (msg?.type === "conversation.item.input_audio_transcription.completed") {
             const transcript = msg.transcript || "";
             log.user("User said:", transcript);
-            setCurrentUserMessage(transcript);
             
             if (transcript) {
               // REAL-TIME UI: Update existing user message with transcript
@@ -1973,25 +1972,7 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
           })}
           
           {/* Current user message (while speaking) - show if speaking or just finished */}
-          {currentUserMessage && (
-            <div style={{
-              margin: "15px 0",
-              padding: "15px 20px",
-              borderRadius: "15px",
-              background: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
-              color: "white",
-              opacity: 0.8,
-              animation: "pulse 1.5s infinite",
-              boxShadow: "0 4px 15px rgba(0,0,0,0.1)"
-            }}>
-              <div style={{fontSize: "14px", opacity: 0.9, marginBottom: "8px", fontWeight: "bold"}}>
-                🗣️ Kez • speaking...
-              </div>
-              <div style={{fontSize: "16px", lineHeight: 1.5, fontWeight: "500"}}>
-                {currentUserMessage}
-              </div>
-            </div>
-          )}
+          {/* Current user message is now handled by real-time conversation array */}
           
           {/* Current assistant message (while responding) */}
           {currentAssistantMessage && (
