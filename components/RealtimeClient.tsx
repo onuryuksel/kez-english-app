@@ -100,6 +100,12 @@ export default function RealtimeClient() {
   const [functionCallDetected, setFunctionCallDetected] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
   
+  // Hybrid Word Progression System
+  const [showWordProgression, setShowWordProgression] = useState(false);
+  const [progressionCountdown, setProgressionCountdown] = useState(8);
+  const [progressionTimer, setProgressionTimer] = useState<NodeJS.Timeout | null>(null);
+  const [progressionReason, setProgressionReason] = useState<'correct_guess' | 'forbidden_word' | null>(null);
+  
   // Taboo Game States
   const [currentWord, setCurrentWord] = useState<typeof TABOO_WORDS[0] | null>(null);
   const [tabooScore, setTabooScore] = useState(0);
@@ -314,13 +320,13 @@ export default function RealtimeClient() {
       }));
       
       // Safe AI response request
-      createSafeResponse("Tell Kez the word was forbidden and we're moving to a new word. Be encouraging and stay in Taboo game mode!");
+      createSafeResponse(`🚨 Oops! "${word}" was a forbidden word, Kez! No worries, that happens to everyone!`);
     }
     
-    // Yeni kelimeye geç - AI'ın cevap vermesi için biraz bekle
+    // Start hybrid word progression system for forbidden word
     setTimeout(() => {
-      getNewTabooWord();
-    }, 3000);
+      startWordProgression('forbidden_word');
+    }, 2000); // Give AI time to acknowledge first
   };
 
   const getNewTabooWord = () => {
@@ -400,6 +406,142 @@ export default function RealtimeClient() {
     }
   };
 
+  // Enhanced Pattern Matching: Smart context-aware guess detection
+  const checkTargetWordVariations = (text: string, targetWord: string): boolean => {
+    const word = targetWord.toLowerCase();
+    const lowerText = text.toLowerCase();
+    
+    const patterns = [
+      // 1. Exact match
+      new RegExp(`\\b${word}\\b`),
+      
+      // 2. Plural form ✅ "footballs"  
+      new RegExp(`\\b${word}s\\b`),
+      
+      // 3. Compound words ✅ "football-related", "football-style"
+      new RegExp(`\\b${word}-\\w+`),
+      new RegExp(`\\w+-${word}\\b`),
+      
+      // 4. Possessive ✅ "football's"
+      new RegExp(`\\b${word}'s\\b`),
+      
+      // 5. With articles ✅ "a football", "the football"
+      new RegExp(`\\ba ${word}\\b`),
+      new RegExp(`\\bthe ${word}\\b`)
+    ];
+    
+    return patterns.some(pattern => pattern.test(lowerText));
+  };
+
+  const isActualGuess = (aiText: string, targetWord: string): boolean => {
+    const guessKeywords = [
+      'could it be', 'is it', 'maybe', 'perhaps', 
+      'think it', 'guess it', 'might be', 'seems like',
+      'looks like', 'sounds like', 'i think', 'i guess',
+      'would it be', 'is that', 'that would be'
+    ];
+    
+    const text = aiText.toLowerCase();
+    
+    // Enhanced guess context detection
+    const hasGuessContext = guessKeywords.some(keyword => text.includes(keyword));
+    
+    // Enhanced target word detection (covers edge cases)
+    const hasTargetWord = checkTargetWordVariations(text, targetWord);
+    
+    // Debug logging for pattern matching
+    if (hasTargetWord && !hasGuessContext) {
+      log.debug(`🎯 Word "${targetWord}" found but no guess context in: "${aiText.substring(0, 50)}..."`);
+    } else if (hasGuessContext && !hasTargetWord) {
+      log.debug(`🤔 Guess context found but no target word "${targetWord}" in: "${aiText.substring(0, 50)}..."`);
+    } else if (hasGuessContext && hasTargetWord) {
+      log.game(`🎯 SMART DETECTION: Actual guess detected for "${targetWord}"`);
+    }
+    
+    // Both conditions must be true for actual guess
+    return hasGuessContext && hasTargetWord;
+  };
+
+  // Hybrid Word Progression: Smart popup-based progression control
+  const startWordProgression = (reason: 'correct_guess' | 'forbidden_word') => {
+    log.game(`🎯 Starting word progression: ${reason}`);
+    
+    // Clear any existing timer
+    if (progressionTimer) {
+      clearTimeout(progressionTimer);
+    }
+    
+    // Show progression popup
+    setProgressionReason(reason);
+    setProgressionCountdown(8);
+    setShowWordProgression(true);
+    
+    // Start countdown timer
+    const timer = setInterval(() => {
+      setProgressionCountdown(prev => {
+        if (prev <= 1) {
+          // Auto-progress when countdown reaches 0
+          autoProgressToNextWord();
+          return 8;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+    
+    setProgressionTimer(timer);
+  };
+  
+  const continueWithCurrentWord = () => {
+    log.game("🔄 User chose to continue with current word");
+    
+    // Clear timer and hide popup
+    if (progressionTimer) {
+      clearTimeout(progressionTimer);
+      setProgressionTimer(null);
+    }
+    setShowWordProgression(false);
+    
+    // Reset game round state
+    setGameRoundActive(true);
+    
+    // AI acknowledgment
+    createSafeResponse(`Great! Let's continue with "${currentWord?.word}". Try describing it in a different way!`);
+  };
+  
+  const progressToNextWord = () => {
+    log.game("➡️ User chose to progress to next word");
+    
+    // Clear timer and hide popup
+    if (progressionTimer) {
+      clearTimeout(progressionTimer);
+      setProgressionTimer(null);
+    }
+    setShowWordProgression(false);
+    
+    // Progress to next word
+    autoProgressToNextWord();
+  };
+  
+  const autoProgressToNextWord = () => {
+    log.game("⏰ Auto-progressing to next word");
+    
+    // Clear timer and hide popup
+    if (progressionTimer) {
+      clearTimeout(progressionTimer);
+      setProgressionTimer(null);
+    }
+    setShowWordProgression(false);
+    
+    // AI announcement
+    createSafeResponse("Let's try a new word!");
+    
+    // Progress after AI speaks
+    setTimeout(() => {
+      getNewTabooWord();
+      setGameRoundActive(true);
+    }, 2000);
+  };
+
   // Safe Response Creation: Always cancel before create to prevent API errors
   const createSafeResponse = (instructions: string, delay: number = 100) => {
     if (dcRef.current?.readyState === "open") {
@@ -467,20 +609,19 @@ export default function RealtimeClient() {
           role: "user",
           content: [{ 
             type: "input_text", 
-            text: `YES! Correct! The word was "${currentWord?.word}". Great job! Let's try another word.` 
+            text: `YES! Correct! The word was "${currentWord?.word}". Great job!` 
           }]
         }
       }));
 
-      // Safe AI response request
-      createSafeResponse("Celebrate the correct guess and move to the next word!");
+      // AI celebration
+      createSafeResponse(`🎉 Excellent, Kez! That was "${currentWord?.word}"! Amazing description!`);
     }
     
-    // Yeni kelimeye geç
+    // Start hybrid word progression system
     setTimeout(() => {
-      getNewTabooWord();
-      setGameRoundActive(true); // Resume round
-    }, 3000);
+      startWordProgression('correct_guess');
+    }, 2000); // Give AI time to celebrate first
   };
 
   const sendFunctionResponse = (callId: string, response: any) => {
@@ -806,6 +947,18 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
               
               // Process pending game logic now that user message is available
               processPendingGameLogic(transcript);
+              
+              // Voice command backup for word progression
+              if (showWordProgression) {
+                const lowerTranscript = transcript.toLowerCase();
+                if (lowerTranscript.includes('continue') || lowerTranscript.includes('same word') || lowerTranscript.includes('keep going')) {
+                  log.game("🎤 Voice command: Continue with current word");
+                  continueWithCurrentWord();
+                } else if (lowerTranscript.includes('next') || lowerTranscript.includes('new word') || lowerTranscript.includes('different word')) {
+                  log.game("🎤 Voice command: Progress to next word");
+                  progressToNextWord();
+                }
+              }
             }
           }
           
@@ -895,31 +1048,21 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
                   // Process forbidden words in AI message
                   checkForbiddenWords(aiMessageContent, 'ai');
                   
-                  // Backup guess detection (fallback mechanism)
-                  const targetWord = currentWord.word.toLowerCase();
-                  const aiText = aiMessageContent.toLowerCase();
+                  // Enhanced backup guess detection (fallback mechanism)
+                  const targetWord = currentWord.word;
                   
-                  // Check if AI mentioned the target word in a guess context
-                  const guessPatterns = [
-                    `could it be a ${targetWord}`,
-                    `could it be ${targetWord}`,
-                    `is it a ${targetWord}`,
-                    `is it ${targetWord}`,
-                    `be a ${targetWord}`,
-                    `be ${targetWord}`,
-                    ` ${targetWord}?`,
-                    ` ${targetWord} `,
-                  ];
-                  
-                  const foundGuess = guessPatterns.some(pattern => aiText.includes(pattern));
+                  // Use smart context-aware detection
+                  const foundGuess = isActualGuess(aiMessageContent, targetWord);
                   
                   if (foundGuess && gameRoundActive && !functionCallDetected) {
-                    log.game("🔄 BACKUP DETECTION: Pattern matching devrede -", targetWord);
+                    log.game("🔄 BACKUP DETECTION: Smart pattern matching devrede -", targetWord);
                     setFunctionCallDetected(true);
                     handleCorrectGuess(targetWord, 0.9);
                     log.success("✅ Backup sistem işledi");
                   } else if (foundGuess && functionCallDetected) {
                     log.warn("❌ Backup susturuldu - ana sistem zaten çalıştı");
+                  } else if (checkTargetWordVariations(aiMessageContent, targetWord) && !foundGuess) {
+                    log.debug(`🔍 Target word "${targetWord}" mentioned but no guess context detected`);
                   }
                 };
                 
@@ -1789,6 +1932,90 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
               letterSpacing: "2px"
             }}>
               Moving to next word...
+            </div>
+          </div>
+        )}
+
+        {/* Word Progression Choice Popup */}
+        {showWordProgression && currentWord && (
+          <div style={{
+            position: 'fixed',
+            bottom: '20px',
+            right: '20px',
+            background: progressionReason === 'correct_guess' 
+              ? 'linear-gradient(135deg, #4CAF50, #45a049)' 
+              : 'linear-gradient(135deg, #ff9800, #f57c00)',
+            color: 'white',
+            padding: '20px',
+            borderRadius: '15px',
+            boxShadow: '0 8px 25px rgba(0,0,0,0.3)',
+            maxWidth: '320px',
+            zIndex: 1500,
+            fontFamily: 'Arial, sans-serif'
+          }}>
+            <div style={{ fontSize: '16px', fontWeight: 'bold', marginBottom: '12px' }}>
+              {progressionReason === 'correct_guess' ? (
+                <>🎉 Excellent! <strong>"{currentWord.word}"</strong> was correct!</>
+              ) : (
+                <>🚨 Oops! Forbidden word used</>
+              )}
+            </div>
+            
+            <div style={{ fontSize: '14px', marginBottom: '15px', opacity: 0.9 }}>
+              What would you like to do?
+            </div>
+            
+            <div style={{ display: 'flex', gap: '10px', marginBottom: '12px' }}>
+              <button 
+                onClick={continueWithCurrentWord}
+                style={{ 
+                  flex: 1,
+                  background: 'rgba(255, 255, 255, 0.2)', 
+                  color: 'white',
+                  border: '1px solid rgba(255, 255, 255, 0.3)',
+                  padding: '10px 12px',
+                  borderRadius: '8px',
+                  fontSize: '13px',
+                  fontWeight: '500',
+                  cursor: 'pointer',
+                  transition: 'all 0.2s'
+                }}
+                onMouseOver={(e) => e.currentTarget.style.background = 'rgba(255, 255, 255, 0.3)'}
+                onMouseOut={(e) => e.currentTarget.style.background = 'rgba(255, 255, 255, 0.2)'}
+              >
+                🔄 Continue with<br/>"{currentWord.word}"
+              </button>
+              
+              <button 
+                onClick={progressToNextWord}
+                style={{ 
+                  flex: 1,
+                  background: 'rgba(255, 255, 255, 0.9)', 
+                  color: progressionReason === 'correct_guess' ? '#4CAF50' : '#ff9800',
+                  border: 'none',
+                  padding: '10px 12px',
+                  borderRadius: '8px',
+                  fontSize: '13px',
+                  fontWeight: '600',
+                  cursor: 'pointer',
+                  transition: 'all 0.2s'
+                }}
+                onMouseOver={(e) => e.currentTarget.style.background = 'white'}
+                onMouseOut={(e) => e.currentTarget.style.background = 'rgba(255, 255, 255, 0.9)'}
+              >
+                ➡️ Next Word
+              </button>
+            </div>
+            
+            <div style={{ 
+              fontSize: '12px', 
+              textAlign: 'center', 
+              opacity: 0.8,
+              background: 'rgba(0, 0, 0, 0.2)',
+              padding: '6px 10px',
+              borderRadius: '6px'
+            }}>
+              ⏰ Auto-next in <strong>{progressionCountdown}</strong> seconds
             </div>
           </div>
         )}
