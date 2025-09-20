@@ -279,10 +279,8 @@ export default function RealtimeClient() {
         }
       }));
       
-      // AI'dan response iste
-      dcRef.current.send(JSON.stringify({
-        type: "response.create"
-      }));
+      // Safe AI response request
+      createSafeResponse("Acknowledge that you said a forbidden word and it's now unlocked for Kez to use. Continue the game!");
     }
   };
   
@@ -315,10 +313,8 @@ export default function RealtimeClient() {
         }
       }));
       
-      // AI'dan response iste
-      dcRef.current.send(JSON.stringify({
-        type: "response.create"
-      }));
+      // Safe AI response request
+      createSafeResponse("Tell Kez the word was forbidden and we're moving to a new word. Be encouraging and stay in Taboo game mode!");
     }
     
     // Yeni kelimeye geç - AI'ın cevap vermesi için biraz bekle
@@ -404,6 +400,33 @@ export default function RealtimeClient() {
     }
   };
 
+  // Safe Response Creation: Always cancel before create to prevent API errors
+  const createSafeResponse = (instructions: string, delay: number = 100) => {
+    if (dcRef.current?.readyState === "open") {
+      // Always cancel any active response first (safe operation)
+      dcRef.current.send(JSON.stringify({
+        type: "response.cancel"
+      }));
+      
+      log.debug("🛑 Cancelled active response");
+      
+      // Wait for cancellation, then create new response
+      setTimeout(() => {
+        if (dcRef.current?.readyState === "open") {
+          dcRef.current.send(JSON.stringify({
+            type: "response.create",
+            response: {
+              modalities: ["text", "audio"],
+              instructions
+            }
+          }));
+          
+          log.debug("🚀 Created new safe response");
+        }
+      }, delay);
+    }
+  };
+
   // Timeline fix: Process buffered game logic when user transcript arrives
   const processPendingGameLogic = (userTranscript: string) => {
     log.debug(`Processing ${pendingGameLogic.length} pending game logic items`);
@@ -449,14 +472,8 @@ export default function RealtimeClient() {
         }
       }));
 
-      // AI'dan response iste
-      dcRef.current.send(JSON.stringify({
-        type: "response.create",
-        response: {
-          modalities: ["text", "audio"],
-          instructions: "Celebrate the correct guess and move to the next word!"
-        }
-      }));
+      // Safe AI response request
+      createSafeResponse("Celebrate the correct guess and move to the next word!");
     }
     
     // Yeni kelimeye geç
@@ -661,16 +678,10 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
               console.log("Sending greeting message:", greetingMessage);
               dc.send(JSON.stringify(greetingMessage));
               
-              const responseRequest = { 
-                type: "response.create",
-                response: {
-                  modalities: ["audio", "text"], // Force both audio and text output
-                  output_audio_format: "pcm16",
-                  instructions: "Always provide both audio and text output. Speak naturally while generating text transcript."
-                }
-              };
-              console.log("Requesting response:", responseRequest);
-              dc.send(JSON.stringify(responseRequest));
+              // Safe initial greeting response
+              setTimeout(() => {
+                createSafeResponse(`Hello Kez! Ready for an exciting ${gameMode} session? Let's have some fun!`);
+              }, 200); // Small delay to ensure setup is complete
               
               // Temizle
               (pc as any).pendingGreeting = null;
