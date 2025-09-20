@@ -65,6 +65,7 @@ export default function RealtimeClient() {
   const [showUsageStats, setShowUsageStats] = useState(false);
   const [isPushToTalk, setIsPushToTalk] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
+  const [silenceDuration, setSilenceDuration] = useState<number>(3500); // Default 3.5 seconds
 
   const pcRef = useRef<RTCPeerConnection|null>(null);
   const dcRef = useRef<RTCDataChannel|null>(null);
@@ -155,7 +156,7 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
     return GAME_MODE_PROMPTS[mode];
   };
 
-  const sendSessionUpdate = (currentPace: Pace, currentGameMode: GameMode) => {
+  const sendSessionUpdate = (currentPace: Pace, currentGameMode: GameMode, currentSilenceDuration?: number) => {
     if (dcRef.current && dcRef.current.readyState === "open") {
       dcRef.current.send(JSON.stringify({
         type: "session.update",
@@ -165,7 +166,7 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
             type: "server_vad",
             threshold: 0.8, // Daha yüksek threshold - daha az hassas
             prefix_padding_ms: 500, // Daha uzun bekleme
-            silence_duration_ms: currentGameMode === "taboo" ? 3500 : 4000 // 3.5-4 saniye sessizlik - Kez'e düşünme zamanı
+            silence_duration_ms: currentSilenceDuration || silenceDuration // Kullanıcı ayarı
           },
           temperature: currentPace === "slow" ? 0.6 : currentPace === "fast" ? 1.0 : 0.8,
           modalities: ["audio", "text"], // Ensure both audio and text are enabled
@@ -175,10 +176,10 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
     }
   };
 
-  // Pace/GameMode değiştikçe session güncelle
+  // Pace/GameMode/SilenceDuration değiştikçe session güncelle
   useEffect(() => {
-    sendSessionUpdate(pace, gameMode);
-  }, [pace, gameMode]);
+    sendSessionUpdate(pace, gameMode, silenceDuration);
+  }, [pace, gameMode, silenceDuration]);
 
   // Taboo kelimesi değiştiğinde prompt güncellemeye gerek yok - AI kelimeyi bilmiyor
 
@@ -248,7 +249,7 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
       dcRef.current = dc;
       dc.onopen = () => {
         console.log("DataChannel opened - ready for mode:", gameMode);
-        sendSessionUpdate(pace, gameMode); // Bu zaten doğru prompt'u gönderecek
+        sendSessionUpdate(pace, gameMode, silenceDuration); // Bu zaten doğru prompt'u gönderecek
         
         // Artık greeting'i güvenle gönderebiliriz
         const pc = pcRef.current;
@@ -692,6 +693,34 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
                 </label>
                 <div style={{fontSize: "14px", color: "#666", marginTop: "5px", marginLeft: "25px"}}>
                   When enabled, hold the mic button to speak
+                </div>
+              </div>
+              
+              <div style={{marginBottom: "15px"}}>
+                <label style={{fontSize: "16px", fontWeight: "bold", marginRight: "15px"}}>
+                  ⏱️ Silence Duration:&nbsp;
+                  <select 
+                    value={silenceDuration} 
+                    onChange={e => setSilenceDuration(Number(e.target.value))}
+                    style={{
+                      padding: "8px 12px",
+                      borderRadius: "8px",
+                      border: "2px solid #ddd",
+                      fontSize: "16px"
+                    }}
+                  >
+                    <option value={500}>0.5 seconds</option>
+                    <option value={1000}>1.0 seconds</option>
+                    <option value={1500}>1.5 seconds</option>
+                    <option value={2000}>2.0 seconds</option>
+                    <option value={2500}>2.5 seconds</option>
+                    <option value={3000}>3.0 seconds</option>
+                    <option value={3500}>3.5 seconds</option>
+                    <option value={4000}>4.0 seconds</option>
+                  </select>
+                </label>
+                <div style={{fontSize: "14px", color: "#666", marginTop: "5px"}}>
+                  How long to wait before AI responds (longer = more thinking time)
                 </div>
               </div>
             </div>
