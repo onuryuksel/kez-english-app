@@ -48,6 +48,7 @@ interface ConversationMessage {
   content: string;
   timestamp: Date;
   isComplete: boolean;
+  sequence: number;
 }
 
 // TABOO_WORDS imported from lib/tabooWords.ts
@@ -83,6 +84,7 @@ export default function RealtimeClient() {
   const [conversation, setConversation] = useState<ConversationMessage[]>([]);
   const [currentUserMessage, setCurrentUserMessage] = useState<string>("");
   const [currentAssistantMessage, setCurrentAssistantMessage] = useState<string>("");
+  const [messageSequence, setMessageSequence] = useState(0);
   
   // Timeline fix: Buffer for proper ordering
   const [pendingUserMessage, setPendingUserMessage] = useState<{
@@ -970,9 +972,10 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
   // Response başladığında yeni AI mesajı başlat
   if (msg.type === "response.created") {
     setCurrentAssistantMessage(""); // Yeni response için temizle
+    setCurrentUserMessage(""); // User message'ı da temizle - AI cevap veriyor
     // Priority System: Reset detection flag for new response
     setFunctionCallDetected(false);
-    log.debug("🔄 Detection flag reset edildi");
+    log.debug("🔄 Detection flag reset edildi - User message cleared");
   }
           
           // Kullanıcı konuşma başladı - VAD analizi için
@@ -997,13 +1000,17 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
             const userTimestamp = new Date();
             userTimestamp.setMilliseconds(userTimestamp.getMilliseconds() - 100); // Slightly before AI response
             
+            const currentSeq = messageSequence;
+            setMessageSequence(prev => prev + 1);
+            
             setPendingUserMessage({
               id: `user-${userTimestamp.getTime()}`,
               content: "", // Will be filled when transcript arrives
-              timestamp: userTimestamp
+              timestamp: userTimestamp,
+              sequence: currentSeq
             });
             
-            console.log("🔍 Created user message placeholder - DEBUG");
+            console.log(`🔍 Created user message placeholder - Sequence: ${currentSeq} - DEBUG`);
           }
 
           // Kullanıcı konuşma transcript'i
@@ -1013,13 +1020,14 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
             setCurrentUserMessage(transcript);
             
             if (transcript) {
-              // Timeline fix: Use pending message with early timestamp (or create new)
+              // Timeline fix: Use pending message with early timestamp and sequence (or create new)
               const userMessage = {
                 id: pendingUserMessage?.id || `user-${Date.now()}`,
                 role: "user" as const,
                 content: transcript,
                 timestamp: pendingUserMessage?.timestamp || new Date(),
-                isComplete: true
+                isComplete: true,
+                sequence: pendingUserMessage?.sequence ?? messageSequence
               };
               
               // Taboo forbidden word kontrolü - Kez'in konuşması
@@ -1105,8 +1113,10 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
             }
             
             if (aiMessageContent) {
-              // Timeline fix: Add AI message to conversation immediately (for UI)
+              // Timeline fix: Add AI message to conversation immediately (for UI) with sequence
               const aiTimestamp = new Date();
+              const currentSeq = messageSequence;
+              setMessageSequence(prev => prev + 1);
               
               setConversation(prev => {
                 // Add small offset to ensure unique timestamp  
@@ -1117,7 +1127,8 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
                   role: "assistant" as const, 
                   content: aiMessageContent,
                   timestamp: aiTimestamp,
-                  isComplete: true
+                  isComplete: true,
+                  sequence: currentSeq
                 }];
                 const timeStr = aiTimestamp.toLocaleTimeString();
                 console.log(`🎯 AI [${timeStr}]: "${aiMessageContent}" - DEBUG`);
@@ -1820,7 +1831,7 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
           )}
           
           {conversation
-            .sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime())
+            .sort((a, b) => a.sequence - b.sequence)
             .map((msg) => {
             // Taboo modunda AI'nin tahminlerini özel göster
             const isTabooGuess = gameMode === "taboo" && msg.role === "assistant" && 
@@ -1890,8 +1901,8 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
             );
           })}
           
-          {/* Current user message (while speaking) - only show if not yet in conversation */}
-          {currentUserMessage && !conversation.find(msg => msg.content === currentUserMessage) && (
+          {/* Current user message (while speaking) - show if speaking or just finished */}
+          {currentUserMessage && (
             <div style={{
               margin: "15px 0",
               padding: "15px 20px",
