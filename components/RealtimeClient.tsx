@@ -731,15 +731,58 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
             console.log("🏁 AI response completed! Current message:", currentAssistantMessage);
             console.log("Full response object:", msg.response);
             
-            if (currentAssistantMessage.trim()) {
+            // Get AI message content from different sources
+            let aiMessageContent = currentAssistantMessage.trim();
+            
+            // If currentAssistantMessage is empty, try to get from response.output
+            if (!aiMessageContent && msg.response?.output && msg.response.output.length > 0) {
+              const outputItem = msg.response.output[0];
+              if (outputItem?.content && outputItem.content.length > 0) {
+                const audioContent = outputItem.content.find((c: any) => c.type === "audio");
+                if (audioContent?.transcript) {
+                  aiMessageContent = audioContent.transcript;
+                  console.log("📝 Got AI message from response.output:", aiMessageContent);
+                }
+              }
+            }
+            
+            if (aiMessageContent) {
               // Taboo forbidden word kontrolü - AI'ın konuşması
-              checkForbiddenWords(currentAssistantMessage, 'ai');
+              checkForbiddenWords(aiMessageContent, 'ai');
+              
+              // Backup: Check if AI guessed the word correctly in text
+              if (gameMode === "taboo" && currentWord) {
+                const targetWord = currentWord.word.toLowerCase();
+                const aiText = aiMessageContent.toLowerCase();
+                
+                // Check if AI mentioned the target word in a guess context
+                const guessPatterns = [
+                  `could it be a ${targetWord}`,
+                  `could it be ${targetWord}`,
+                  `is it a ${targetWord}`,
+                  `is it ${targetWord}`,
+                  `be a ${targetWord}`,
+                  `be ${targetWord}`,
+                  ` ${targetWord}?`,
+                  ` ${targetWord} `,
+                ];
+                
+                const foundGuess = guessPatterns.some(pattern => aiText.includes(pattern));
+                
+                if (foundGuess) {
+                  console.log("🎯 BACKUP: AI guessed correct word in text:", targetWord);
+                  // Give small delay to let function call process first
+                  setTimeout(() => {
+                    handleCorrectGuess(targetWord);
+                  }, 500);
+                }
+              }
               
               setConversation(prev => {
                 const newConversation = [...prev, {
                   id: `assistant-${Date.now()}`,
                   role: "assistant" as const, 
-                  content: currentAssistantMessage,
+                  content: aiMessageContent,
                   timestamp: new Date(),
                   isComplete: true
                 }];
@@ -749,11 +792,8 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
               });
               setCurrentAssistantMessage(""); // Temizle
             } else {
-              console.log("⚠️ AI message was empty, not adding to conversation");
-              // Eğer response'da output varsa onu kullan
-              if (msg.response?.output) {
-                console.log("🔍 Checking response output for content:", msg.response.output);
-              }
+              console.log("⚠️ AI message was empty from all sources");
+              console.log("🔍 Response output:", msg.response?.output);
             }
             
             // Token usage tracking 💰
