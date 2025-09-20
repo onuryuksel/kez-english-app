@@ -138,6 +138,7 @@ export default function RealtimeClient() {
   const [isPushToTalk, setIsPushToTalk] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [silenceDuration, setSilenceDuration] = useState<number>(3500); // Default 3.5 seconds
+  const [selectedVoice, setSelectedVoice] = useState<'alloy' | 'echo' | 'fable' | 'onyx' | 'nova' | 'shimmer' | 'verse'>('verse'); // Default voice
   
   // Voice Activity Tuning - Kullanıcı davranış analizi 🎯
   const [speechAnalytics, setSpeechAnalytics] = useState({
@@ -710,6 +711,7 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
         type: "session.update",
         session: {
           instructions: getCurrentPrompt(currentGameMode),
+          voice: selectedVoice, // Update voice in session
           turn_detection: {
             type: "server_vad",
             threshold: threshold, // Optimal threshold veya default
@@ -728,10 +730,10 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
     }
   };
 
-  // Pace/GameMode/SilenceDuration değiştikçe session güncelle
+  // Pace/GameMode/SilenceDuration/Voice değiştikçe session güncelle
   useEffect(() => {
     sendSessionUpdate(pace, gameMode, silenceDuration);
-  }, [pace, gameMode, silenceDuration]);
+  }, [pace, gameMode, silenceDuration, selectedVoice]);
 
   // Taboo kelimesi değiştiğinde prompt güncellemeye gerek yok - AI kelimeyi bilmiyor
 
@@ -741,7 +743,7 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
       const sess = await fetch("/api/realtime-session", { 
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ gameMode })
+        body: JSON.stringify({ gameMode, voice: selectedVoice })
       }).then(r=>r.json());
       console.log("EPHEMERAL SESSION:", sess);
       const token = sess?.client_secret?.value;
@@ -1436,10 +1438,37 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
                     <option value={3000}>3.0 seconds</option>
                     <option value={3500}>3.5 seconds</option>
                     <option value={4000}>4.0 seconds</option>
-          </select>
-        </label>
+                  </select>
+                </label>
                 <div style={{fontSize: "14px", color: "#666", marginTop: "5px"}}>
                   How long to wait before AI responds (longer = more thinking time)
+                </div>
+              </div>
+
+              <div style={{marginBottom: "15px"}}>
+                <label style={{fontSize: "16px", fontWeight: "bold", marginRight: "15px"}}>
+                  🎤 AI Voice:&nbsp;
+                  <select 
+                    value={selectedVoice} 
+                    onChange={e => setSelectedVoice(e.target.value as any)}
+                    style={{
+                      padding: "8px 12px",
+                      borderRadius: "8px",
+                      border: "2px solid #ddd",
+                      fontSize: "16px"
+                    }}
+                  >
+                    <option value="alloy">Alloy (Neutral)</option>
+                    <option value="echo">Echo (Male)</option>
+                    <option value="fable">Fable (British Male)</option>
+                    <option value="onyx">Onyx (Deep Male)</option>
+                    <option value="nova">Nova (Female)</option>
+                    <option value="shimmer">Shimmer (Soft Female)</option>
+                    <option value="verse">Verse (Default)</option>
+                  </select>
+                </label>
+                <div style={{fontSize: "14px", color: "#666", marginTop: "5px"}}>
+                  Choose the AI voice that Kez prefers most
                 </div>
               </div>
             </div>

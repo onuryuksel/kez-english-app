@@ -5,7 +5,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   if (req.method !== "POST") return res.status(405).end();
 
   try {
-    const { gameMode = "casual" } = req.body;
+    const { gameMode = "casual", voice = "verse" } = req.body;
     const model = "gpt-4o-mini-realtime-preview-2024-12-17"; // cheaper realtime tier
     const apiKey = process.env.OPENAI_API_KEY;
     if (!apiKey) {
@@ -26,7 +26,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       body: JSON.stringify({
         model,
         // Realtime oturumu için başlangıç ayarları:
-        voice: "verse",                // (dokümandaki örnek seslerden biri)
+        voice: voice,                  // User-selected voice
         modalities: ["audio", "text"], // konuşma içeriği
         instructions: instructions,
         // Transcription özelliğini etkinleştir - İngilizce zorla
