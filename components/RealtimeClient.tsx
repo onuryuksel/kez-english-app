@@ -254,29 +254,36 @@ export default function RealtimeClient() {
     
     const lowerText = text.toLowerCase();
     
-    // DEBUG: Show current forbidden word status
-    console.log(`🔍 FORBIDDEN WORD STATUS: ${JSON.stringify(forbiddenWordStatus)} - DEBUG`);
+    // Get CURRENT state (not stale)
+    const currentStatus = forbiddenWordStatus;
+    console.log(`🔍 CURRENT FORBIDDEN WORD STATUS: ${JSON.stringify(currentStatus)} - DEBUG`);
     
     const activeForbiddenWords = currentWord.forbidden.filter(word => 
-      forbiddenWordStatus[word] !== 'unlocked'
+      currentStatus[word] !== 'unlocked'
+    );
+    const unlockedWords = currentWord.forbidden.filter(word => 
+      currentStatus[word] === 'unlocked'
     );
     
     console.log(`🚫 ACTIVE forbidden words: [${activeForbiddenWords.join(', ')}] - DEBUG`);
-    console.log(`🔓 UNLOCKED forbidden words: [${currentWord.forbidden.filter(word => forbiddenWordStatus[word] === 'unlocked').join(', ')}] - DEBUG`);
+    console.log(`🔓 UNLOCKED forbidden words: [${unlockedWords.join(', ')}] - DEBUG`);
     
-    for (const forbiddenWord of activeForbiddenWords) {
+    for (const forbiddenWord of currentWord.forbidden) {
       if (lowerText.includes(forbiddenWord.toLowerCase())) {
-        log.warn(`🚫 Forbidden word detected: "${forbiddenWord}" by ${speaker}`);
+        const isUnlocked = currentStatus[forbiddenWord] === 'unlocked';
+        
+        log.warn(`🚫 Forbidden word detected: "${forbiddenWord}" by ${speaker} - Status: ${isUnlocked ? 'UNLOCKED' : 'ACTIVE'}`);
+        
+        if (isUnlocked) {
+          console.log(`✅ Word "${forbiddenWord}" is unlocked - ${speaker} can use it freely - DEBUG`);
+          return; // Don't process unlocked words
+        }
         
         if (speaker === 'ai') {
-          // AI said forbidden word - unlock it! (but only if not already unlocked)
-          if (forbiddenWordStatus[forbiddenWord] !== 'unlocked') {
-            unlockForbiddenWord(forbiddenWord);
-          } else {
-            console.log(`🔓 Word "${forbiddenWord}" already unlocked - skipping - DEBUG`);
-          }
+          // AI said forbidden word - unlock it!
+          unlockForbiddenWord(forbiddenWord);
         } else {
-          // User said forbidden word - game over for this round
+          // User said ACTIVE forbidden word - buzzer!
           handleUserForbiddenWord(forbiddenWord);
         }
         break;
@@ -1044,26 +1051,9 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
               setTimeout(() => applyOptimalSettings(), 1000);
             }
             
-            // REAL-TIME UI: Add user message immediately (like console)
-            const userTimestamp = new Date();
-            const currentSeq = messageSequenceRef.current;
-            messageSequenceRef.current += 1;
-            
-            const userMessage = {
-              id: `user-${userTimestamp.getTime()}`,
-              role: "user" as const,
-              content: "🎤 Speaking...",
-              timestamp: userTimestamp,
-              isComplete: false,
-              sequence: currentSeq
-            };
-            
-            // Add to conversation immediately (console-like behavior)
-            setConversation(prev => [...prev, userMessage]);
-            console.log(`✅ USER MESSAGE ADDED IMMEDIATELY - Sequence: ${currentSeq} - DEBUG`);
-            
-            // Store reference for transcript update
-            setPendingUserMessage(userMessage);
+            // DON'T add placeholder here - wait for actual transcript
+            // This prevents duplicate user messages in UI
+            console.log(`🎤 Speech stopped - waiting for transcript - DEBUG`);
           }
 
           // Kullanıcı konuşma transcript'i
