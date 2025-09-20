@@ -947,18 +947,6 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
               
               // Process pending game logic now that user message is available
               processPendingGameLogic(transcript);
-              
-              // Voice command backup for word progression
-              if (showWordProgression) {
-                const lowerTranscript = transcript.toLowerCase();
-                if (lowerTranscript.includes('continue') || lowerTranscript.includes('same word') || lowerTranscript.includes('keep going')) {
-                  log.game("🎤 Voice command: Continue with current word");
-                  continueWithCurrentWord();
-                } else if (lowerTranscript.includes('next') || lowerTranscript.includes('new word') || lowerTranscript.includes('different word')) {
-                  log.game("🎤 Voice command: Progress to next word");
-                  progressToNextWord();
-                }
-              }
             }
           }
           
