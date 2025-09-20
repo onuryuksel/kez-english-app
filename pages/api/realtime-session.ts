@@ -32,7 +32,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         // Transcription özelliğini etkinleştir - İngilizce zorla
         input_audio_transcription: {
           model: "whisper-1",
-          language: "en" // İngilizce transcription zorla
+          language: "en" // Kullanıcı transcription İngilizce zorla
+        },
+        // AI output transcription da İngilizce olsun
+        output_audio_transcription: {
+          model: "whisper-1", 
+          language: "en" // AI transcription da İngilizce zorla
         },
         // Turn detection ve response ayarları
         turn_detection: { 

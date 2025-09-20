@@ -173,7 +173,11 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
           output_audio_format: "pcm16",
           input_audio_transcription: {
             model: "whisper-1",
-            language: "en" // İngilizce transcription zorla
+            language: "en" // Kullanıcı transcription İngilizce zorla
+          },
+          output_audio_transcription: {
+            model: "whisper-1",
+            language: "en" // AI transcription da İngilizce zorla
           }
         }
       }));
@@ -275,7 +279,8 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
                 type: "response.create",
                 response: {
                   modalities: ["audio", "text"], // Force both audio and text output
-                  output_audio_format: "pcm16"
+                  output_audio_format: "pcm16",
+                  instructions: "Always provide both audio and text output. Speak naturally while generating text transcript."
                 }
               };
               console.log("Requesting response:", responseRequest);
@@ -302,7 +307,12 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
         console.log("DataChannel message received:", ev.data);
         try {
           const msg = JSON.parse(ev.data);
-          console.log("Parsed message:", msg);
+          console.log("📨 Parsed message:", msg.type, msg);
+          
+          // AI response event'lerini özellikle takip et
+          if (msg.type?.startsWith("response.")) {
+            console.log("🤖 AI Response Event:", msg.type, msg);
+          }
           
           // Error mesajlarını özellikle takip et
           if (msg.type === "error") {
@@ -333,21 +343,32 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
             }
           }
           
-          // Asistan cevap transcript'i (text delta)
-          if (msg?.type === "response.output_text.delta") {
+          // AI konuşma transcript'i - DOĞRU EVENT TÜRÜ
+          if (msg?.type === "response.text.delta") {
             const textDelta = msg.delta || "";
-            console.log("Text delta received:", textDelta);
+            console.log("🤖 AI text delta received:", textDelta);
             setCurrentAssistantMessage(prev => {
               const newMessage = prev + textDelta;
-              console.log("Updated assistant message:", newMessage);
+              console.log("Updated AI message:", newMessage);
               return newMessage;
             });
           }
           
-          // Alternative AI response formats
-          if (msg?.type === "response.text.delta") {
+          // AI audio transcript (ses çıktısının transcript'i)
+          if (msg?.type === "response.audio_transcript.delta") {
+            const transcriptDelta = msg.delta || "";
+            console.log("🔊 AI audio transcript delta:", transcriptDelta);
+            setCurrentAssistantMessage(prev => {
+              const newMessage = prev + transcriptDelta;
+              console.log("Updated AI audio transcript:", newMessage);
+              return newMessage;
+            });
+          }
+          
+          // Eski format (fallback)
+          if (msg?.type === "response.output_text.delta") {
             const textDelta = msg.delta || "";
-            console.log("Alternative text delta received:", textDelta);
+            console.log("📝 Legacy text delta received:", textDelta);
             setCurrentAssistantMessage(prev => prev + textDelta);
           }
           
@@ -366,9 +387,11 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
             }
           }
           
-          // Asistan cevabı tamamlandı
-          if (msg?.type === "response.done") {
-            console.log("Response done! Current assistant message:", currentAssistantMessage);
+          // AI cevabı tamamlandı
+          if (msg?.type === "response.done" || msg?.type === "response.completed") {
+            console.log("🏁 AI response completed! Current message:", currentAssistantMessage);
+            console.log("Full response object:", msg.response);
+            
             if (currentAssistantMessage.trim()) {
               setConversation(prev => [...prev, {
                 id: `assistant-${Date.now()}`,
@@ -378,9 +401,13 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
                 isComplete: true
               }]);
               setCurrentAssistantMessage(""); // Temizle
-              console.log("Added assistant message to conversation");
+              console.log("✅ Added AI message to conversation");
             } else {
-              console.log("Assistant message was empty, not adding to conversation");
+              console.log("⚠️ AI message was empty, not adding to conversation");
+              // Eğer response'da output varsa onu kullan
+              if (msg.response?.output) {
+                console.log("🔍 Checking response output for content:", msg.response.output);
+              }
             }
             
             // Token usage tracking 💰
