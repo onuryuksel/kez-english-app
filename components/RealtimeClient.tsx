@@ -122,12 +122,14 @@ export default function RealtimeClient() {
     show: boolean, 
     word: string, 
     message: string,
-    showChoices: boolean
+    showChoices: boolean,
+    type: 'forbidden' | 'correct'
   }>({
     show: false,
     word: '',
     message: '',
-    showChoices: false
+    showChoices: false,
+    type: 'forbidden'
   });
   const [recentlyUnlocked, setRecentlyUnlocked] = useState<string[]>([]);
   
@@ -322,7 +324,8 @@ export default function RealtimeClient() {
       show: true,
       word: word,
       message: `🚨 BUZZER! Kez used forbidden word "${word}"`,
-      showChoices: true
+      showChoices: true,
+      type: 'forbidden'
     });
     
     // DON'T auto-close popup - wait for user choice
@@ -338,7 +341,8 @@ export default function RealtimeClient() {
       show: false,
       word: '',
       message: '',
-      showChoices: false
+      showChoices: false,
+      type: 'forbidden'
     });
     
     // RESUME GAME - Re-enable AI responses
@@ -357,7 +361,8 @@ export default function RealtimeClient() {
       show: false,
       word: '',
       message: '',
-      showChoices: false
+      showChoices: false,
+      type: 'forbidden'
     });
     
     // Notify AI about forbidden word usage
@@ -698,10 +703,16 @@ export default function RealtimeClient() {
       createSafeResponse(`🎉 Excellent, Kez! That was "${currentWord?.word}"! Amazing description!`);
     }
     
-    // Start hybrid word progression system
-    setTimeout(() => {
-      startWordProgression('correct_guess');
-    }, 2000); // Give AI time to celebrate first
+    // Show GREEN buzzer popup for correct guess - NO TIMER!
+    setBuzzerPopup({
+      show: true,
+      word: currentWord.word,
+      message: `🎉 EXCELLENT! You got "${currentWord.word}" correct!`,
+      showChoices: true,
+      type: 'correct'
+    });
+    
+    console.log(`🎉 CORRECT GUESS: "${currentWord.word}" - Waiting for user choice - DEBUG`);
   };
 
   const sendFunctionResponse = (callId: string, response: any) => {
@@ -2032,19 +2043,25 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
             top: "50%",
             left: "50%",
             transform: "translate(-50%, -50%) rotate(-2deg)",
-            background: "linear-gradient(135deg, #ff4757 0%, #ff3742 100%)",
+            background: buzzerPopup.type === 'correct' 
+              ? "linear-gradient(135deg, #4CAF50 0%, #45a049 100%)"
+              : "linear-gradient(135deg, #ff4757 0%, #ff3742 100%)",
             color: "white",
             padding: "30px 40px",
             borderRadius: "20px",
             fontSize: "24px",
             fontWeight: "bold",
             textAlign: "center",
-            boxShadow: "0 20px 40px rgba(255, 71, 87, 0.4)",
+            boxShadow: buzzerPopup.type === 'correct'
+              ? "0 20px 40px rgba(76, 175, 80, 0.4)"
+              : "0 20px 40px rgba(255, 71, 87, 0.4)",
             zIndex: 9999,
             border: "3px solid white",
             transition: "transform 0.1s ease-in-out"
           }}>
-            <div style={{ fontSize: "48px", marginBottom: "10px" }}>🚨</div>
+            <div style={{ fontSize: "48px", marginBottom: "10px" }}>
+              {buzzerPopup.type === 'correct' ? '🎉' : '🚨'}
+            </div>
             <div>{buzzerPopup.message}</div>
             
             {buzzerPopup.showChoices && (
@@ -2081,7 +2098,7 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
                       e.currentTarget.style.transform = "scale(1)";
                     }}
                   >
-                    🔄 Continue Word
+                    {buzzerPopup.type === 'correct' ? '🔄 Same Word Again' : '🔄 Continue Word'}
                   </button>
                   
                   <button
