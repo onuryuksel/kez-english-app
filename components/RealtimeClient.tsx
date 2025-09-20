@@ -10,7 +10,7 @@ const LOG_LEVELS = {
   DEBUG: 3
 };
 
-const CURRENT_LOG_LEVEL = LOG_LEVELS.INFO; // Temporary DEBUG for forbidden word debugging
+const CURRENT_LOG_LEVEL = LOG_LEVELS.DEBUG; // Temporary DEBUG for forbidden word debugging // Temporary DEBUG for forbidden word debugging
 
 const log = {
   error: (...args: any[]) => {
@@ -1072,24 +1072,28 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
             log.user("User said:", transcript);
             
             if (transcript) {
-              // REAL-TIME UI: Update existing user message with transcript
-              if (pendingUserMessage) {
-                setConversation(prev => prev.map(msg => 
-                  msg.id === pendingUserMessage.id 
-                    ? { ...msg, content: transcript, isComplete: true }
-                    : msg
-                ));
-                
-                const timeStr = pendingUserMessage.timestamp.toLocaleTimeString();
-                console.log(`✅ USER MESSAGE UPDATED: "${transcript}" [${timeStr}] - Sequence: ${pendingUserMessage.sequence} - DEBUG`);
-                
-                // Taboo forbidden word kontrolü - Kez'in konuşması
-                checkForbiddenWords(transcript, 'user');
-              } else {
-                console.log(`❌ NO PENDING USER MESSAGE for transcript: "${transcript}" - DEBUG`);
-              }
+              // REAL-TIME UI: Use same logic as console - add message directly
+              const userTimestamp = new Date();
+              const currentSeq = messageSequenceRef.current;
+              messageSequenceRef.current += 1;
               
-              // Clear placeholder and current message
+              const userMessage = {
+                id: `user-${userTimestamp.getTime()}`,
+                role: "user" as const,
+                content: transcript,
+                timestamp: userTimestamp,
+                isComplete: true,
+                sequence: currentSeq
+              };
+              
+              // Add to conversation immediately (same as console logic)
+              setConversation(prev => [...prev, userMessage]);
+              console.log(`✅ USER MESSAGE ADDED DIRECTLY: "${transcript}" [${userTimestamp.toLocaleTimeString()}] - Sequence: ${currentSeq} - DEBUG`);
+              
+              // Taboo forbidden word kontrolü - Kez'in konuşması
+              checkForbiddenWords(transcript, 'user');
+              
+              // Clear any pending user message
               setPendingUserMessage(null);
               setCurrentUserMessage(""); 
               
