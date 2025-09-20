@@ -53,6 +53,12 @@ export default function RealtimeClient() {
   const [tabooScore, setTabooScore] = useState(0);
   const [usedWords, setUsedWords] = useState<string[]>([]);
   
+  // Advanced Taboo Rules - Forbidden Word Status 🚫➡️✅
+  const [forbiddenWordStatus, setForbiddenWordStatus] = useState<{
+    [word: string]: 'active' | 'unlocked'
+  }>({});
+  const [gameRoundActive, setGameRoundActive] = useState(false);
+  
   // Token usage tracking 💰
   const [sessionUsage, setSessionUsage] = useState<{
     totalTokens: number;
@@ -148,7 +154,79 @@ export default function RealtimeClient() {
     }
   };
 
-  // Taboo Game Functions
+  // Advanced Taboo Game Functions 🎮
+  
+  // Forbidden word analysis
+  const checkForbiddenWords = (text: string, speaker: 'user' | 'ai') => {
+    if (!currentWord || !gameRoundActive) return;
+    
+    const lowerText = text.toLowerCase();
+    const activeForbiddenWords = currentWord.forbidden.filter(word => 
+      forbiddenWordStatus[word] !== 'unlocked'
+    );
+    
+    for (const forbiddenWord of activeForbiddenWords) {
+      if (lowerText.includes(forbiddenWord.toLowerCase())) {
+        console.log(`🚫 Forbidden word detected: "${forbiddenWord}" by ${speaker}`);
+        
+        if (speaker === 'ai') {
+          // AI said forbidden word - unlock it!
+          unlockForbiddenWord(forbiddenWord);
+        } else {
+          // User said forbidden word - game over for this round
+          handleUserForbiddenWord(forbiddenWord);
+        }
+        break;
+      }
+    }
+  };
+  
+  const unlockForbiddenWord = (word: string) => {
+    setForbiddenWordStatus(prev => ({
+      ...prev,
+      [word]: 'unlocked'
+    }));
+    
+    console.log(`✅ Word unlocked by AI: "${word}"`);
+    
+    // AI'a bildir
+    if (dcRef.current?.readyState === "open") {
+      dcRef.current.send(JSON.stringify({
+        type: "conversation.item.create",
+        item: {
+          type: "message",
+          role: "user",
+          content: [{ 
+            type: "input_text", 
+            text: `Great! You said "${word}" so now Kez can use that word too. Keep guessing!` 
+          }]
+        }
+      }));
+    }
+  };
+  
+  const handleUserForbiddenWord = (word: string) => {
+    console.log(`❌ User used forbidden word: "${word}"`);
+    
+    // AI'a bildir ve yeni kelimeye geç
+    if (dcRef.current?.readyState === "open") {
+      dcRef.current.send(JSON.stringify({
+        type: "conversation.item.create",
+        item: {
+          type: "message",
+          role: "user",
+          content: [{ 
+            type: "input_text", 
+            text: `BUZZER! Kez, you used the forbidden word "${word}". Let's try a new word!` 
+          }]
+        }
+      }));
+    }
+    
+    // Yeni kelimeye geç
+    setTimeout(() => nextTabooWord(), 2000);
+  };
+
   const getNewTabooWord = () => {
     const availableWords = TABOO_WORDS.filter(w => !usedWords.includes(w.word));
     if (availableWords.length === 0) {
@@ -162,6 +240,21 @@ export default function RealtimeClient() {
       setCurrentWord(randomWord);
       setUsedWords(prev => [...prev, randomWord.word]);
     }
+    
+    // Yeni kelime başladığında tüm forbidden words aktif
+    initializeForbiddenWords();
+  };
+
+  const initializeForbiddenWords = () => {
+    if (currentWord) {
+      const initialStatus: { [word: string]: 'active' | 'unlocked' } = {};
+      currentWord.forbidden.forEach(word => {
+        initialStatus[word] = 'active';
+      });
+      setForbiddenWordStatus(initialStatus);
+      setGameRoundActive(true);
+      console.log("🎮 New Taboo round started - all forbidden words active:", currentWord.forbidden);
+    }
   };
 
   const nextTabooWord = () => {
@@ -173,14 +266,98 @@ export default function RealtimeClient() {
     getNewTabooWord();
   };
 
+  // Function Call Handler - Phase 2 🎮
+  const handleTabooFunctionCall = (msg: any) => {
+    if (msg.name === "taboo_guess_result") {
+      const args = JSON.parse(msg.arguments || "{}");
+      console.log("🎯 Taboo function call:", args);
+      
+      const { guessed_word, is_correct, confidence, action } = args;
+      
+      if (action === "correct" && is_correct && currentWord) {
+        // AI doğru tahmin etti!
+        const actualWord = currentWord.word.toLowerCase();
+        const guessedWord = guessed_word.toLowerCase();
+        
+        // Kelime eşleşmesini kontrol et (fuzzy matching)
+        const isMatch = actualWord === guessedWord || 
+                       actualWord.includes(guessedWord) || 
+                       guessedWord.includes(actualWord);
+        
+        if (isMatch) {
+          console.log("🎉 Correct guess confirmed!");
+          handleCorrectGuess(guessed_word, confidence);
+        } else {
+          console.log("❌ Guess doesn't match target word");
+          sendFunctionResponse(msg.call_id, {
+            success: false,
+            message: "That's not the word I'm thinking of. Keep guessing!"
+          });
+        }
+      } else {
+        // Normal guess attempt
+        sendFunctionResponse(msg.call_id, {
+          success: true,
+          message: confidence > 0.8 ? "Good guess! Tell me more." : "Interesting guess, but not quite right."
+        });
+      }
+    }
+  };
+
+  const handleCorrectGuess = (guessedWord: string, confidence: number) => {
+    // Skor artır
+    setTabooScore(prev => prev + 1);
+    
+    // AI'a başarı mesajı gönder
+    if (dcRef.current?.readyState === "open") {
+      dcRef.current.send(JSON.stringify({
+        type: "conversation.item.create",
+        item: {
+          type: "message",
+          role: "user",
+          content: [{ 
+            type: "input_text", 
+            text: `YES! Correct! The word was "${currentWord?.word}". Great job! Let's try another word.` 
+          }]
+        }
+      }));
+    }
+    
+    // Yeni kelimeye geç
+    setTimeout(() => {
+      getNewTabooWord();
+    }, 3000);
+  };
+
+  const sendFunctionResponse = (callId: string, response: any) => {
+    if (dcRef.current?.readyState === "open") {
+      dcRef.current.send(JSON.stringify({
+        type: "conversation.item.create",
+        item: {
+          type: "function_call_output",
+          call_id: callId,
+          output: JSON.stringify(response)
+        }
+      }));
+    }
+  };
+
   // Taboo moduna geçince yeni kelime al
   useEffect(() => {
     if (gameMode === "taboo" && !currentWord) {
       getNewTabooWord();
     } else if (gameMode !== "taboo") {
       setCurrentWord(null);
+      setGameRoundActive(false);
     }
   }, [gameMode]);
+
+  // Yeni kelime seçildiğinde forbidden words'ü initialize et
+  useEffect(() => {
+    if (currentWord && gameMode === "taboo") {
+      initializeForbiddenWords();
+    }
+  }, [currentWord]);
 
   // Dynamic prompt generation for Taboo mode
   const getCurrentPrompt = (mode: GameMode) => {
@@ -396,6 +573,16 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
             setStatus(`API Error: ${msg.error?.message || 'Unknown error'}`);
             return;
           }
+
+          // Function call handling - Taboo game functions 🎮
+          if (msg.type === "response.function_call_delta") {
+            console.log("🔧 Function call delta:", msg);
+          }
+
+          if (msg.type === "response.function_call_done") {
+            console.log("🎯 Function call completed:", msg);
+            handleTabooFunctionCall(msg);
+          }
           
           // Kullanıcı konuşma başladı - VAD analizi için
           if (msg?.type === "input_audio_buffer.speech_started") {
@@ -427,6 +614,9 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
             });
             setCurrentUserMessage(transcript);
             if (transcript) {
+              // Taboo forbidden word kontrolü - Kez'in konuşması
+              checkForbiddenWords(transcript, 'user');
+              
               setConversation(prev => [...prev, {
                 id: `user-${Date.now()}`,
                 role: "user",
@@ -488,6 +678,9 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
             console.log("Full response object:", msg.response);
             
             if (currentAssistantMessage.trim()) {
+              // Taboo forbidden word kontrolü - AI'ın konuşması
+              checkForbiddenWords(currentAssistantMessage, 'ai');
+              
               setConversation(prev => [...prev, {
                 id: `assistant-${Date.now()}`,
                 role: "assistant", 
@@ -914,11 +1107,51 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
             <div style={{
               fontSize: "48px",
               fontWeight: "bold",
-              marginBottom: "20px",
+              marginBottom: "10px",
               textShadow: "2px 2px 4px rgba(0,0,0,0.3)"
             }}>
               {currentWord.word}
-      </div>
+            </div>
+            
+            {/* Game State & Rules Status */}
+            <div style={{
+              fontSize: "14px",
+              marginBottom: "15px",
+              display: "flex",
+              gap: "10px",
+              justifyContent: "center",
+              flexWrap: "wrap"
+            }}>
+              <div style={{
+                padding: "4px 12px",
+                background: gameRoundActive ? "rgba(76, 175, 80, 0.8)" : "rgba(255, 152, 0, 0.8)",
+                borderRadius: "15px",
+                color: "white",
+                fontWeight: "bold"
+              }}>
+                {gameRoundActive ? "🎮 Round Active" : "⏸️ Round Paused"}
+              </div>
+              
+              <div style={{
+                padding: "4px 12px",
+                background: "rgba(33, 150, 243, 0.8)",
+                borderRadius: "15px",
+                color: "white",
+                fontWeight: "bold"
+              }}>
+                🚫 {currentWord.forbidden.filter(w => forbiddenWordStatus[w] !== 'unlocked').length} Active
+              </div>
+              
+              <div style={{
+                padding: "4px 12px",
+                background: "rgba(76, 175, 80, 0.8)",
+                borderRadius: "15px",
+                color: "white",
+                fontWeight: "bold"
+              }}>
+                ✅ {currentWord.forbidden.filter(w => forbiddenWordStatus[w] === 'unlocked').length} Unlocked
+              </div>
+            </div>
 
             <div style={{
               fontSize: "18px",
@@ -935,22 +1168,29 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
               justifyContent: "center",
               marginBottom: "25px"
             }}>
-              {currentWord.forbidden.map((word, index) => (
-                <div
-                  key={index}
-                  style={{
-                    background: "rgba(255,255,255,0.9)",
-                    color: currentMode.color,
-                    padding: "8px 15px",
-                    borderRadius: "25px",
-                    fontSize: "16px",
-                    fontWeight: "bold",
-                    border: "2px solid white"
-                  }}
-                >
-                  🚫 {word}
-                </div>
-              ))}
+              {currentWord.forbidden.map((word, index) => {
+                const isUnlocked = forbiddenWordStatus[word] === 'unlocked';
+                return (
+                  <div
+                    key={index}
+                    style={{
+                      background: isUnlocked ? "rgba(76, 175, 80, 0.9)" : "rgba(255,255,255,0.9)",
+                      color: isUnlocked ? "white" : currentMode.color,
+                      padding: "8px 15px",
+                      borderRadius: "25px",
+                      fontSize: "16px",
+                      fontWeight: "bold",
+                      border: isUnlocked ? "2px solid #4CAF50" : "2px solid white",
+                      textDecoration: isUnlocked ? "line-through" : "none",
+                      opacity: isUnlocked ? 0.8 : 1,
+                      transition: "all 0.3s ease",
+                      transform: isUnlocked ? "scale(0.95)" : "scale(1)"
+                    }}
+                  >
+                    {isUnlocked ? "✅" : "🚫"} {word}
+                  </div>
+                );
+              })}
       </div>
 
             <div style={{

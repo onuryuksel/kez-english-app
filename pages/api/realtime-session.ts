@@ -47,6 +47,36 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         },
         // Output options - audio format
         output_audio_format: "pcm16",
+        // Function tools for Taboo game
+        tools: gameMode === "taboo" ? [{
+          type: "function",
+          name: "taboo_guess_result",
+          description: "Call this when you think you've guessed the word Kez is describing, or when you want to report game events",
+          parameters: {
+            type: "object",
+            properties: {
+              guessed_word: {
+                type: "string",
+                description: "The word you think Kez is describing"
+              },
+              is_correct: {
+                type: "boolean", 
+                description: "Whether you believe your guess is correct"
+              },
+              confidence: {
+                type: "number",
+                description: "Your confidence level (0-1)"
+              },
+              action: {
+                type: "string",
+                enum: ["guess", "correct", "give_up"],
+                description: "What action you're taking"
+              }
+            },
+            required: ["guessed_word", "is_correct", "confidence", "action"]
+          }
+        }] : [],
+        tool_choice: gameMode === "taboo" ? "auto" : "none",
         speed: 1.0
       })
     });
