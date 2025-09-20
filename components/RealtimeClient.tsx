@@ -930,13 +930,13 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
             log.user("User said:", transcript);
             setCurrentUserMessage(transcript);
             
-            if (transcript && pendingUserMessage) {
-              // Timeline fix: Use pending message with early timestamp
+            if (transcript) {
+              // Timeline fix: Use pending message with early timestamp (or create new)
               const userMessage = {
-                id: pendingUserMessage.id,
+                id: pendingUserMessage?.id || `user-${Date.now()}`,
                 role: "user" as const,
                 content: transcript,
-                timestamp: pendingUserMessage.timestamp,
+                timestamp: pendingUserMessage?.timestamp || new Date(),
                 isComplete: true
               };
               
@@ -946,8 +946,8 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
               setConversation(prev => {
                 const newConversation = [...prev, userMessage];
                 const timeStr = userMessage.timestamp.toLocaleTimeString();
-                console.log(`🗣️ KEZ [${timeStr}]: "${transcript}"`);
-                log.success(`Conversation: ${newConversation.length} messages`);
+                console.log(`✅ KEZ MESSAGE ADDED: "${transcript}" [${timeStr}] - DEBUG`);
+                console.log(`✅ Conversation: ${newConversation.length} messages - DEBUG`);
                 return newConversation;
               });
               
@@ -956,7 +956,10 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
               setCurrentUserMessage(""); 
               
               // Process pending game logic now that user message is available
-              processPendingGameLogic(transcript);
+              // Use setTimeout to ensure state updates are processed
+              setTimeout(() => {
+                processPendingGameLogic(transcript);
+              }, 10);
             }
           }
           
@@ -1035,8 +1038,8 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
                   isComplete: true
                 }];
                 const timeStr = aiTimestamp.toLocaleTimeString();
-                console.log(`🎯 AI [${timeStr}]: "${aiMessageContent}"`);
-                log.success(`AI message added. Total: ${newConversation.length}`);
+                console.log(`🎯 AI [${timeStr}]: "${aiMessageContent}" - DEBUG`);
+                console.log(`✅ AI message added. Total: ${newConversation.length} - DEBUG`);
                 return newConversation;
               });
 
@@ -1044,6 +1047,7 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
               if (gameMode === "taboo" && currentWord) {
                 const gameLogicCallback = () => {
                   // Process forbidden words in AI message
+                  console.log(`🔍 PROCESSING AI FORBIDDEN WORDS: "${aiMessageContent}" - DEBUG`);
                   checkForbiddenWords(aiMessageContent, 'ai');
                   
                   // Enhanced backup guess detection (fallback mechanism)
@@ -1053,24 +1057,31 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
                   const foundGuess = isActualGuess(aiMessageContent, targetWord);
                   
                   if (foundGuess && gameRoundActive && !functionCallDetected) {
-                    log.game("🔄 BACKUP DETECTION: Smart pattern matching devrede -", targetWord);
+                    console.log(`🎮 BACKUP DETECTION: AI guessed correct word: ${targetWord} - DEBUG`);
                     setFunctionCallDetected(true);
+                    console.log(`🎮 CALLING handleCorrectGuess for: ${targetWord} - DEBUG`);
                     handleCorrectGuess(targetWord, 0.9);
-                    log.success("✅ Backup sistem işledi");
+                    console.log("✅ Backup system processed - DEBUG");
                   } else if (foundGuess && functionCallDetected) {
-                    log.warn("❌ Backup susturuldu - ana sistem zaten çalıştı");
+                    console.log("❌ Backup silenced - main system already ran - DEBUG");
                   } else if (checkTargetWordVariations(aiMessageContent, targetWord) && !foundGuess) {
-                    log.debug(`🔍 Target word "${targetWord}" mentioned but no guess context detected`);
+                    console.log(`🔍 Target word "${targetWord}" mentioned but no guess context detected - DEBUG`);
+                  } else {
+                    console.log(`🔍 No target word match found in: "${aiMessageContent}" - DEBUG`);
                   }
                 };
                 
-                setPendingGameLogic(prev => [...prev, {
-                  aiMessage: aiMessageContent,
-                  aiTimestamp,
-                  callback: gameLogicCallback
-                }]);
+                setPendingGameLogic(prev => {
+                  const newPendingLogic = [...prev, {
+                    aiMessage: aiMessageContent,
+                    aiTimestamp,
+                    callback: gameLogicCallback
+                  }];
+                  console.log(`✅ BUFFERED GAME LOGIC: ${newPendingLogic.length} items - DEBUG`);
+                  return newPendingLogic;
+                });
                 
-                log.debug("Buffered game logic for user transcript");
+                console.log("✅ Buffered game logic for user transcript - DEBUG");
               } else {
                 // For non-taboo modes, process immediately
                 checkForbiddenWords(aiMessageContent, 'ai');
