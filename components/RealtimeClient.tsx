@@ -66,6 +66,21 @@ export default function RealtimeClient() {
   const [isPushToTalk, setIsPushToTalk] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [silenceDuration, setSilenceDuration] = useState<number>(3500); // Default 3.5 seconds
+  
+  // Voice Activity Tuning - Kullanıcı davranış analizi 🎯
+  const [speechAnalytics, setSpeechAnalytics] = useState({
+    totalSpeechEvents: 0,
+    averageSpeechDuration: 0,
+    averagePauseDuration: 0,
+    interruptionCount: 0,
+    backgroundNoiseLevel: 0.5,
+    optimalThreshold: 0.8,
+    optimalSilenceDuration: 3500,
+    lastSpeechStart: 0,
+    lastSpeechEnd: 0,
+    speechDurations: [] as number[],
+    pauseDurations: [] as number[]
+  });
 
   const pcRef = useRef<RTCPeerConnection|null>(null);
   const dcRef = useRef<RTCDataChannel|null>(null);
@@ -81,6 +96,57 @@ export default function RealtimeClient() {
       });
     }
   }, [isRecording, connected, isPushToTalk]);
+
+  // Voice Activity Analytics Functions 🎯
+  const analyzeSpeechPattern = (speechStart: number, speechEnd: number) => {
+    const speechDuration = speechEnd - speechStart;
+    const pauseDuration = speechStart - speechAnalytics.lastSpeechEnd;
+    
+    setSpeechAnalytics(prev => {
+      const newSpeechDurations = [...prev.speechDurations, speechDuration].slice(-10); // Son 10 konuşma
+      const newPauseDurations = pauseDuration > 0 ? [...prev.pauseDurations, pauseDuration].slice(-10) : prev.pauseDurations;
+      
+      const avgSpeechDuration = newSpeechDurations.reduce((a, b) => a + b, 0) / newSpeechDurations.length;
+      const avgPauseDuration = newPauseDurations.length > 0 ? newPauseDurations.reduce((a, b) => a + b, 0) / newPauseDurations.length : prev.averagePauseDuration;
+      
+      // Optimal ayarları hesapla
+      const optimalSilence = Math.max(1000, Math.min(5000, avgPauseDuration * 1.2)); // 1-5 saniye arası
+      const optimalThreshold = prev.backgroundNoiseLevel + 0.2; // Arka plan sesinin üstünde
+      
+      console.log("🎯 Speech Analytics Updated:", {
+        speechDuration,
+        pauseDuration,
+        avgSpeechDuration,
+        avgPauseDuration,
+        optimalSilence,
+        optimalThreshold
+      });
+      
+      return {
+        ...prev,
+        totalSpeechEvents: prev.totalSpeechEvents + 1,
+        averageSpeechDuration: avgSpeechDuration,
+        averagePauseDuration: avgPauseDuration,
+        optimalThreshold: optimalThreshold,
+        optimalSilenceDuration: optimalSilence,
+        lastSpeechStart: speechStart,
+        lastSpeechEnd: speechEnd,
+        speechDurations: newSpeechDurations,
+        pauseDurations: newPauseDurations
+      };
+    });
+  };
+
+  const applyOptimalSettings = () => {
+    if (speechAnalytics.totalSpeechEvents >= 3) { // En az 3 konuşma sonrası optimize et
+      console.log("🎯 Applying optimal VAD settings:", {
+        threshold: speechAnalytics.optimalThreshold,
+        silenceDuration: speechAnalytics.optimalSilenceDuration
+      });
+      
+      sendSessionUpdate(pace, gameMode, speechAnalytics.optimalSilenceDuration, true);
+    }
+  };
 
   // Taboo Game Functions
   const getNewTabooWord = () => {
@@ -156,15 +222,25 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
     return GAME_MODE_PROMPTS[mode];
   };
 
-  const sendSessionUpdate = (currentPace: Pace, currentGameMode: GameMode, currentSilenceDuration?: number) => {
+  const sendSessionUpdate = (currentPace: Pace, currentGameMode: GameMode, currentSilenceDuration?: number, useOptimalThreshold?: boolean) => {
     if (dcRef.current && dcRef.current.readyState === "open") {
+      const threshold = useOptimalThreshold && speechAnalytics.totalSpeechEvents >= 3 
+        ? speechAnalytics.optimalThreshold 
+        : 0.8;
+      
+      console.log("🎛️ Updating session with VAD settings:", {
+        threshold,
+        silenceDuration: currentSilenceDuration || silenceDuration,
+        isOptimal: useOptimalThreshold && speechAnalytics.totalSpeechEvents >= 3
+      });
+      
       dcRef.current.send(JSON.stringify({
         type: "session.update",
         session: {
           instructions: getCurrentPrompt(currentGameMode),
           turn_detection: {
             type: "server_vad",
-            threshold: 0.8, // Daha yüksek threshold - daha az hassas
+            threshold: threshold, // Optimal threshold veya default
             prefix_padding_ms: 500, // Daha uzun bekleme
             silence_duration_ms: currentSilenceDuration || silenceDuration // Kullanıcı ayarı
           },
@@ -321,6 +397,25 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
             return;
           }
           
+          // Kullanıcı konuşma başladı - VAD analizi için
+          if (msg?.type === "input_audio_buffer.speech_started") {
+            const speechStart = msg.audio_start_ms || Date.now();
+            console.log("🎤 Speech started:", speechStart);
+            setSpeechAnalytics(prev => ({ ...prev, lastSpeechStart: speechStart }));
+          }
+
+          // Kullanıcı konuşma bitti - VAD analizi için
+          if (msg?.type === "input_audio_buffer.speech_stopped") {
+            const speechEnd = msg.audio_end_ms || Date.now();
+            console.log("🎤 Speech stopped:", speechEnd);
+            
+            if (speechAnalytics.lastSpeechStart > 0) {
+              analyzeSpeechPattern(speechAnalytics.lastSpeechStart, speechEnd);
+              // 3 konuşma sonrası optimal ayarları uygula
+              setTimeout(() => applyOptimalSettings(), 1000);
+            }
+          }
+
           // Kullanıcı konuşma transcript'i
           if (msg?.type === "conversation.item.input_audio_transcription.completed") {
             const transcript = msg.transcript || "";
@@ -733,6 +828,20 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
                 </div>
               </div>
               
+              {/* Voice Activity Analytics Display */}
+              {speechAnalytics.totalSpeechEvents >= 3 && (
+                <div style={{marginBottom: "15px", padding: "10px", background: "#e8f5e8", borderRadius: "8px", border: "1px solid #4CAF50"}}>
+                  <div style={{fontSize: "14px", fontWeight: "bold", color: "#2E7D32", marginBottom: "5px"}}>
+                    🎯 Smart VAD Active (Optimized for your speech pattern)
+                  </div>
+                  <div style={{fontSize: "12px", color: "#388E3C"}}>
+                    Analyzed {speechAnalytics.totalSpeechEvents} speech events • 
+                    Avg pause: {Math.round(speechAnalytics.averagePauseDuration/1000*10)/10}s • 
+                    Optimal silence: {Math.round(speechAnalytics.optimalSilenceDuration/1000*10)/10}s
+                  </div>
+                </div>
+              )}
+
               <div style={{marginBottom: "15px"}}>
                 <label style={{fontSize: "16px", fontWeight: "bold", marginRight: "15px"}}>
                   ⏱️ Silence Duration:&nbsp;
