@@ -2,6 +2,43 @@ import { useEffect, useRef, useState } from "react";
 import { TABOO_WORDS } from "../lib/tabooWords";
 import { GAME_MODE_PROMPTS } from "../lib/coachPrompt";
 
+// Log levels for cleaner debugging
+const LOG_LEVELS = {
+  ERROR: 0,
+  WARN: 1, 
+  INFO: 2,
+  DEBUG: 3
+};
+
+const CURRENT_LOG_LEVEL = LOG_LEVELS.INFO; // Change to DEBUG for detailed logs
+
+const log = {
+  error: (...args: any[]) => {
+    if (CURRENT_LOG_LEVEL >= LOG_LEVELS.ERROR) console.error("❌", ...args);
+  },
+  warn: (...args: any[]) => {
+    if (CURRENT_LOG_LEVEL >= LOG_LEVELS.WARN) console.warn("⚠️", ...args);
+  },
+  info: (...args: any[]) => {
+    if (CURRENT_LOG_LEVEL >= LOG_LEVELS.INFO) console.log("ℹ️", ...args);
+  },
+  debug: (...args: any[]) => {
+    if (CURRENT_LOG_LEVEL >= LOG_LEVELS.DEBUG) console.log("🔍", ...args);
+  },
+  success: (...args: any[]) => {
+    if (CURRENT_LOG_LEVEL >= LOG_LEVELS.INFO) console.log("✅", ...args);
+  },
+  game: (...args: any[]) => {
+    if (CURRENT_LOG_LEVEL >= LOG_LEVELS.INFO) console.log("🎮", ...args);
+  },
+  ai: (...args: any[]) => {
+    if (CURRENT_LOG_LEVEL >= LOG_LEVELS.INFO) console.log("🤖", ...args);
+  },
+  user: (...args: any[]) => {
+    if (CURRENT_LOG_LEVEL >= LOG_LEVELS.INFO) console.log("🎤", ...args);
+  }
+};
+
 type Pace = "slow"|"medium"|"fast";
 type GameMode = "casual"|"roleplay"|"taboo";
 
@@ -198,7 +235,7 @@ export default function RealtimeClient() {
   };
   
   const unlockForbiddenWord = (word: string) => {
-    console.log(`🔓 AI used forbidden word "${word}" - UNLOCKING IT!`);
+    log.game(`Word unlocked: "${word}"`);
     
     setForbiddenWordStatus(prev => ({
       ...prev,
@@ -235,7 +272,7 @@ export default function RealtimeClient() {
   };
   
   const handleUserForbiddenWord = (word: string) => {
-    console.log(`❌ User used forbidden word: "${word}"`);
+    log.warn(`User used forbidden word: "${word}"`);
     
     // Buzzer popup göster
     setBuzzerPopup({
@@ -601,14 +638,13 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
       };
       dc.onmessage = (ev) => {
         // Realtime API, datachannel üzerinden event/JSON gönderebilir
-        console.log("DataChannel message received:", ev.data);
         try {
           const msg = JSON.parse(ev.data);
-          console.log("📨 Parsed message:", msg.type, msg);
+          log.debug("Message:", msg.type);
           
-  // AI response event'lerini özellikle takip et
-  if (msg.type?.startsWith("response.")) {
-    console.log("🤖 AI Response Event:", msg.type, msg);
+  // AI response event'lerini özellikle takip et - sadece önemli olanlar
+  if (msg.type === "response.created" || msg.type === "response.done") {
+    log.ai("AI Event:", msg.type);
   }
   
   // Error mesajlarını özellikle takip et
@@ -620,11 +656,11 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
 
   // Function call handling - Taboo game functions 🎮
   if (msg.type === "response.function_call_delta") {
-    console.log("🔧 Function call delta:", msg);
+    log.debug("Function call delta");
   }
 
   if (msg.type === "response.function_call_done") {
-    console.log("🎯 Function call completed:", msg);
+    log.game("Function call:", msg.name);
     handleTabooFunctionCall(msg);
   }
 
@@ -636,14 +672,14 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
           // Kullanıcı konuşma başladı - VAD analizi için
           if (msg?.type === "input_audio_buffer.speech_started") {
             const speechStart = msg.audio_start_ms || Date.now();
-            console.log("🎤 Speech started:", speechStart);
+            log.debug("Speech started");
             setSpeechAnalytics(prev => ({ ...prev, lastSpeechStart: speechStart }));
           }
 
           // Kullanıcı konuşma bitti - VAD analizi için
           if (msg?.type === "input_audio_buffer.speech_stopped") {
             const speechEnd = msg.audio_end_ms || Date.now();
-            console.log("🎤 Speech stopped:", speechEnd);
+            log.debug("Speech stopped");
             
             if (speechAnalytics.lastSpeechStart > 0) {
               analyzeSpeechPattern(speechAnalytics.lastSpeechStart, speechEnd);
@@ -655,12 +691,7 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
           // Kullanıcı konuşma transcript'i
           if (msg?.type === "conversation.item.input_audio_transcription.completed") {
             const transcript = msg.transcript || "";
-            console.log("🎤 User transcript received:", {
-              transcript,
-              language: msg.language || "unknown",
-              confidence: msg.confidence || "unknown",
-              fullMessage: msg
-            });
+            log.user("User said:", transcript);
             setCurrentUserMessage(transcript);
             if (transcript) {
               // Taboo forbidden word kontrolü - Kez'in konuşması
@@ -674,8 +705,7 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
                   timestamp: new Date(),
                   isComplete: true
                 }];
-                console.log("✅ Added USER message to conversation. Total messages:", newConversation.length);
-                console.log("📝 Current conversation:", newConversation.map(m => `${m.role}: ${m.content.substring(0, 30)}...`));
+                log.success(`Conversation: ${newConversation.length} messages`);
                 return newConversation;
               });
               setCurrentUserMessage(""); // Temizle
@@ -696,12 +726,8 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
           // AI audio transcript (ses çıktısının transcript'i)
           if (msg?.type === "response.audio_transcript.delta") {
             const transcriptDelta = msg.delta || "";
-            console.log("🔊 AI audio transcript delta:", transcriptDelta);
-            setCurrentAssistantMessage(prev => {
-              const newMessage = prev + transcriptDelta;
-              console.log("Updated AI audio transcript:", newMessage);
-              return newMessage;
-            });
+            log.debug("AI audio delta:", transcriptDelta);
+            setCurrentAssistantMessage(prev => prev + transcriptDelta);
           }
           
           // Eski format (fallback)
@@ -728,8 +754,7 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
           
           // AI cevabı tamamlandı
           if (msg?.type === "response.done" || msg?.type === "response.completed") {
-            console.log("🏁 AI response completed! Current message:", currentAssistantMessage);
-            console.log("Full response object:", msg.response);
+            log.ai("Response completed");
             
             // Get AI message content from different sources
             let aiMessageContent = currentAssistantMessage.trim();
@@ -741,7 +766,7 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
                 const audioContent = outputItem.content.find((c: any) => c.type === "audio");
                 if (audioContent?.transcript) {
                   aiMessageContent = audioContent.transcript;
-                  console.log("📝 Got AI message from response.output:", aiMessageContent);
+                  log.debug("Got AI message from response.output:", aiMessageContent);
                 }
               }
             }
@@ -770,7 +795,7 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
                 const foundGuess = guessPatterns.some(pattern => aiText.includes(pattern));
                 
                 if (foundGuess) {
-                  console.log("🎯 BACKUP: AI guessed correct word in text:", targetWord);
+                  log.game("AI guessed correct word:", targetWord);
                   // Give small delay to let function call process first
                   setTimeout(() => {
                     handleCorrectGuess(targetWord);
@@ -786,14 +811,12 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
                   timestamp: new Date(),
                   isComplete: true
                 }];
-                console.log("✅ Added AI message to conversation. Total messages:", newConversation.length);
-                console.log("📝 Current conversation:", newConversation.map(m => `${m.role}: ${m.content.substring(0, 30)}...`));
+                log.success(`AI message added. Total: ${newConversation.length}`);
                 return newConversation;
               });
               setCurrentAssistantMessage(""); // Temizle
             } else {
-              console.log("⚠️ AI message was empty from all sources");
-              console.log("🔍 Response output:", msg.response?.output);
+              log.warn("AI message was empty from all sources");
             }
             
             // Token usage tracking 💰
@@ -816,15 +839,10 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
                 cost: totalCost
               });
               
-              console.log("💰 Token Usage:", {
-                total: usage.total_tokens,
-                input_audio: inputAudioTokens,
-                output_audio: outputAudioTokens,
-                cost: `$${totalCost.toFixed(4)}`
-              });
+              log.info(`Cost: $${totalCost.toFixed(4)} (${usage.total_tokens} tokens)`);
             }
             
-            console.log("Response completed:", msg.response);
+            log.debug("Response completed");
           }
           
           // JSON formatında öğretmen yanıtı
@@ -833,10 +851,10 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
           }
           
           if (msg?.type === "response.audio.delta") {
-            console.log("Audio delta received");
+            log.debug("Audio delta received");
           }
         } catch (e) { 
-          console.log("Non-JSON message:", ev.data);
+          log.debug("Non-JSON message received");
         }
       };
 
@@ -1481,7 +1499,7 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
                     📚 English learning support
                   </div>
                 )}
-              </div>
+    </div>
             );
           })}
           
