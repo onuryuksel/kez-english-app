@@ -637,12 +637,21 @@ export default function RealtimeClient() {
   };
 
   // Safe Response Creation: Check if response is active before cancelling
+  const lastResponseTimeRef = useRef(0);
   const createSafeResponse = (instructions: string, delay: number = 100) => {
     // GAME PAUSE CHECK: Don't create responses when game is paused
     if (!gameRoundActive && buzzerPopup.show) {
       console.log("🚫 BLOCKED: Game paused, buzzer popup active - no AI response - DEBUG");
       return;
     }
+    
+    // RATE LIMITING: Prevent rapid successive calls
+    const now = Date.now();
+    if (now - lastResponseTimeRef.current < 500) { // 500ms cooldown
+      console.log("🚫 RATE LIMITED: Too many createSafeResponse calls - DEBUG");
+      return;
+    }
+    lastResponseTimeRef.current = now;
     
     if (dcRef.current?.readyState === "open") {
       // Only cancel if there's an active response (to prevent API errors)
@@ -1191,12 +1200,20 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
                 };
                 
                 setPendingGameLogic(prev => {
+                  // DUPLICATE PREVENTION: Check if this message is already buffered
+                  const isDuplicate = prev.some(item => item.aiMessage === aiMessageContent);
+                  if (isDuplicate) {
+                    console.log(`🔄 DUPLICATE PREVENTED: AI message already buffered - DEBUG`);
+                    return prev;
+                  }
+                  
                   const newPendingLogic = [...prev, {
                     aiMessage: aiMessageContent,
                     aiTimestamp,
                     callback: gameLogicCallback
                   }];
                   console.log(`✅ BUFFERED GAME LOGIC: ${newPendingLogic.length} items - DEBUG`);
+                  
                   // SMART PROCESSING - Process immediately but prevent duplicates
                   setTimeout(() => {
                     // Only process if this is the latest buffered item
