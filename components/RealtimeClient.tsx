@@ -719,15 +719,20 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
               checkForbiddenWords(transcript, 'user');
               
               setConversation(prev => {
+                const timestamp = new Date();
+                // Add small offset to ensure unique timestamp
+                timestamp.setMilliseconds(timestamp.getMilliseconds() + prev.length);
+                
                 const newConversation = [...prev, {
-                  id: `user-${Date.now()}`,
+                  id: `user-${timestamp.getTime()}`,
                   role: "user" as const,
                   content: transcript,
-                  timestamp: new Date(),
+                  timestamp,
                   isComplete: true
                 }];
+                const timeStr = timestamp.toLocaleTimeString();
+                console.log(`🗣️ KEZ [${timeStr}]: "${transcript}"`);
                 log.success(`Conversation: ${newConversation.length} messages`);
-                console.log(`🗣️ KEZ: "${transcript}"`);
                 return newConversation;
               });
               setCurrentUserMessage(""); // Temizle
@@ -775,7 +780,7 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
           }
           
           // AI cevabı tamamlandı
-          if (msg?.type === "response.done" || msg?.type === "response.completed") {
+          if (msg?.type === "response.done") {
             log.ai("Response completed");
             
             // Get AI message content from different sources
@@ -828,15 +833,20 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
               }
               
               setConversation(prev => {
+                const timestamp = new Date();
+                // Add small offset to ensure unique timestamp  
+                timestamp.setMilliseconds(timestamp.getMilliseconds() + prev.length);
+                
                 const newConversation = [...prev, {
-                  id: `assistant-${Date.now()}`,
+                  id: `assistant-${timestamp.getTime()}`,
                   role: "assistant" as const, 
                   content: aiMessageContent,
-                  timestamp: new Date(),
+                  timestamp,
                   isComplete: true
                 }];
+                const timeStr = timestamp.toLocaleTimeString();
+                console.log(`🎯 AI [${timeStr}]: "${aiMessageContent}"`);
                 log.success(`AI message added. Total: ${newConversation.length}`);
-                console.log(`🎯 AI: "${aiMessageContent}"`);
                 return newConversation;
               });
               
@@ -873,10 +883,8 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
             log.debug("Response completed");
           }
           
-          // JSON formatında öğretmen yanıtı
-          if (msg?.type === "response.completed" && msg?.response) {
-            setLastJson(msg.response);
-          }
+          // JSON formatında öğretmen yanıtı - use response.done instead
+          // (removed response.completed to avoid duplicates)
           
           if (msg?.type === "response.audio.delta") {
             log.debug("Audio delta received");
