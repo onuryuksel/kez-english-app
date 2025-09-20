@@ -242,11 +242,16 @@ export default function RealtimeClient() {
     }
     
     const lowerText = text.toLowerCase();
+    
+    // DEBUG: Show current forbidden word status
+    console.log(`🔍 FORBIDDEN WORD STATUS: ${JSON.stringify(forbiddenWordStatus)} - DEBUG`);
+    
     const activeForbiddenWords = currentWord.forbidden.filter(word => 
       forbiddenWordStatus[word] !== 'unlocked'
     );
     
-    log.debug(`🚫 Active forbidden words: [${activeForbiddenWords.join(', ')}]`);
+    console.log(`🚫 ACTIVE forbidden words: [${activeForbiddenWords.join(', ')}] - DEBUG`);
+    console.log(`🔓 UNLOCKED forbidden words: [${currentWord.forbidden.filter(word => forbiddenWordStatus[word] === 'unlocked').join(', ')}] - DEBUG`);
     
     for (const forbiddenWord of activeForbiddenWords) {
       if (lowerText.includes(forbiddenWord.toLowerCase())) {
@@ -436,7 +441,10 @@ export default function RealtimeClient() {
       'could it be', 'is it', 'maybe', 'perhaps', 
       'think it', 'guess it', 'might be', 'seems like',
       'looks like', 'sounds like', 'i think', 'i guess',
-      'would it be', 'is that', 'that would be'
+      'would it be', 'is that', 'that would be',
+      // ADD: More natural answer patterns
+      'store it in a', 'put it in a', 'keep it in a', 'place it in a',
+      'you might store', 'you store', 'you keep', 'you put'
     ];
     
     const text = aiText.toLowerCase();
@@ -539,6 +547,12 @@ export default function RealtimeClient() {
   const autoProgressToNextWord = () => {
     log.game("⏰ Auto-progressing to next word");
     
+    // PREVENT INFINITE LOOP - Check if already processing
+    if (showWordProgression) {
+      console.log("🚫 BLOCKED: Auto-progression already in progress - DEBUG");
+      return;
+    }
+    
     // Clear timer and hide popup
     if (progressionTimer) {
       clearTimeout(progressionTimer);
@@ -549,8 +563,9 @@ export default function RealtimeClient() {
     // AI announcement
     createSafeResponse("Let's try a new word!");
     
-    // Progress after AI speaks
+    // Progress after AI speaks - SINGLE EXECUTION ONLY
     setTimeout(() => {
+      console.log(`🎮 EXECUTING: Single word progression - DEBUG`);
       getNewTabooWord();
       setGameRoundActive(true);
       console.log(`🎮 GAME RESUMED - New word started - DEBUG`);
@@ -1087,18 +1102,8 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
                     callback: gameLogicCallback
                   }];
                   console.log(`✅ BUFFERED GAME LOGIC: ${newPendingLogic.length} items - DEBUG`);
-                  // Immediately process if no user transcript is pending
-                  setTimeout(() => {
-                    if (newPendingLogic.length > 0) {
-                      console.log(`🔄 Auto-processing ${newPendingLogic.length} buffered game logic items - DEBUG`);
-                      newPendingLogic.forEach(item => {
-                        console.log(`🔄 Processing buffered item: "${item.aiMessage}" - DEBUG`);
-                        item.callback();
-                      });
-                      // Clear processed items
-                      setPendingGameLogic([]);
-                    }
-                  }, 50);
+                  // PREVENT DUPLICATE PROCESSING - Only process once per response
+                  console.log(`🔍 PROCESSING CONTROL: Buffered for later processing - DEBUG`);
                   return newPendingLogic;
                 });
                 
