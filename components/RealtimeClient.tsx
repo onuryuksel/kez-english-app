@@ -843,27 +843,12 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
   const currentMode = GAME_MODES[gameMode];
 
   return (
-    <>
-      <style jsx>{`
-        @keyframes shake {
-          0% { transform: translate(-50%, -50%) rotate(-1deg); }
-          25% { transform: translate(-50%, -50%) rotate(1deg); }
-          50% { transform: translate(-50%, -50%) rotate(-1deg); }
-          75% { transform: translate(-50%, -50%) rotate(1deg); }
-          100% { transform: translate(-50%, -50%) rotate(-1deg); }
-        }
-        
-        .buzzer-popup {
-          animation: shake 0.5s ease-in-out infinite;
-        }
-      `}</style>
-      
-      <div style={{
-        background: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
-        minHeight: "100vh",
-        padding: "20px",
-        fontFamily: "system-ui"
-      }}>
+    <div style={{
+      background: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
+      minHeight: "100vh",
+      padding: "20px",
+      fontFamily: "system-ui"
+    }}>
       <div style={{
         maxWidth: "900px",
         margin: "0 auto",
@@ -1543,11 +1528,11 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
 
         {/* Buzzer Popup */}
         {buzzerPopup.show && (
-          <div className="buzzer-popup" style={{
+          <div style={{
             position: "fixed",
             top: "50%",
             left: "50%",
-            transform: "translate(-50%, -50%)",
+            transform: "translate(-50%, -50%) rotate(-2deg)",
             background: "linear-gradient(135deg, #ff4757 0%, #ff3742 100%)",
             color: "white",
             padding: "30px 40px",
@@ -1557,7 +1542,8 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
             textAlign: "center",
             boxShadow: "0 20px 40px rgba(255, 71, 87, 0.4)",
             zIndex: 9999,
-            border: "3px solid white"
+            border: "3px solid white",
+            transition: "transform 0.1s ease-in-out"
           }}>
             <div style={{ fontSize: "48px", marginBottom: "10px" }}>🚨</div>
             <div>{buzzerPopup.message}</div>
@@ -1589,6 +1575,6 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
           </p>
         </div>
       </div>
-    </>
+    </div>
   );
 }
