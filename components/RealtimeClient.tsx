@@ -580,18 +580,18 @@ export default function RealtimeClient() {
 
   // Timeline fix: Process buffered game logic when user transcript arrives
   const processPendingGameLogic = (userTranscript: string) => {
-    log.debug(`Processing ${pendingGameLogic.length} pending game logic items`);
+    console.log(`🔍 Processing ${pendingGameLogic.length} pending game logic items - DEBUG`);
     
     // Execute all pending game logic callbacks
     pendingGameLogic.forEach(({ callback, aiMessage }, index) => {
-      log.debug(`Executing game logic ${index + 1}: AI said "${aiMessage.substring(0, 50)}..."`);
+      console.log(`🔍 Executing game logic ${index + 1}: AI said "${aiMessage.substring(0, 50)}..." - DEBUG`);
       callback();
     });
     
     // Clear pending game logic
     setPendingGameLogic([]);
     
-    log.debug("All pending game logic processed");
+    console.log("🔍 All pending game logic processed - DEBUG");
   };
 
   const handleCorrectGuess = (guessedWord: string, confidence?: number) => {
@@ -921,7 +921,7 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
               timestamp: userTimestamp
             });
             
-            log.debug("Created user message placeholder");
+            console.log("🔍 Created user message placeholder - DEBUG");
           }
 
           // Kullanıcı konuşma transcript'i
