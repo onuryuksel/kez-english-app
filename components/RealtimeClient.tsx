@@ -644,13 +644,18 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
               // Taboo forbidden word kontrolü - Kez'in konuşması
               checkForbiddenWords(transcript, 'user');
               
-              setConversation(prev => [...prev, {
-                id: `user-${Date.now()}`,
-                role: "user",
-                content: transcript,
-                timestamp: new Date(),
-                isComplete: true
-              }]);
+              setConversation(prev => {
+                const newConversation = [...prev, {
+                  id: `user-${Date.now()}`,
+                  role: "user",
+                  content: transcript,
+                  timestamp: new Date(),
+                  isComplete: true
+                }];
+                console.log("✅ Added USER message to conversation. Total messages:", newConversation.length);
+                console.log("📝 Current conversation:", newConversation.map(m => `${m.role}: ${m.content.substring(0, 30)}...`));
+                return newConversation;
+              });
               setCurrentUserMessage(""); // Temizle
             }
           }
@@ -708,15 +713,19 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
               // Taboo forbidden word kontrolü - AI'ın konuşması
               checkForbiddenWords(currentAssistantMessage, 'ai');
               
-              setConversation(prev => [...prev, {
-                id: `assistant-${Date.now()}`,
-                role: "assistant", 
-                content: currentAssistantMessage,
-                timestamp: new Date(),
-                isComplete: true
-              }]);
+              setConversation(prev => {
+                const newConversation = [...prev, {
+                  id: `assistant-${Date.now()}`,
+                  role: "assistant", 
+                  content: currentAssistantMessage,
+                  timestamp: new Date(),
+                  isComplete: true
+                }];
+                console.log("✅ Added AI message to conversation. Total messages:", newConversation.length);
+                console.log("📝 Current conversation:", newConversation.map(m => `${m.role}: ${m.content.substring(0, 30)}...`));
+                return newConversation;
+              });
               setCurrentAssistantMessage(""); // Temizle
-              console.log("✅ Added AI message to conversation");
             } else {
               console.log("⚠️ AI message was empty, not adding to conversation");
               // Eğer response'da output varsa onu kullan
@@ -1295,6 +1304,20 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
             }}>
               {conversation.length} messages
             </div>
+            
+            {/* Debug conversation array */}
+            {process.env.NODE_ENV === 'development' && (
+              <div style={{
+                fontSize: "12px",
+                color: "#666",
+                marginTop: "5px",
+                padding: "5px",
+                background: "#f0f0f0",
+                borderRadius: "5px"
+              }}>
+                DEBUG: {conversation.map(m => `${m.role}:${m.content.substring(0,20)}...`).join(" | ")}
+              </div>
+            )}
       </div>
 
           {conversation.length === 0 && !currentUserMessage && !currentAssistantMessage && (
