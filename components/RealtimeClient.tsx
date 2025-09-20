@@ -10,7 +10,7 @@ const LOG_LEVELS = {
   DEBUG: 3
 };
 
-const CURRENT_LOG_LEVEL = LOG_LEVELS.INFO; // Change to DEBUG for detailed logs
+const CURRENT_LOG_LEVEL = LOG_LEVELS.DEBUG; // Temporary DEBUG for forbidden word debugging
 
 const log = {
   error: (...args: any[]) => {
@@ -233,16 +233,24 @@ export default function RealtimeClient() {
   
   // Forbidden word analysis
   const checkForbiddenWords = (text: string, speaker: 'user' | 'ai') => {
-    if (!currentWord || !gameRoundActive) return;
+    log.debug(`🔍 Checking forbidden words for ${speaker}: "${text}"`);
+    log.debug(`🎮 Current word: ${currentWord?.word}, Round active: ${gameRoundActive}`);
+    
+    if (!currentWord || !gameRoundActive) {
+      log.debug("❌ Skipping forbidden word check - no current word or round not active");
+      return;
+    }
     
     const lowerText = text.toLowerCase();
     const activeForbiddenWords = currentWord.forbidden.filter(word => 
       forbiddenWordStatus[word] !== 'unlocked'
     );
     
+    log.debug(`🚫 Active forbidden words: [${activeForbiddenWords.join(', ')}]`);
+    
     for (const forbiddenWord of activeForbiddenWords) {
       if (lowerText.includes(forbiddenWord.toLowerCase())) {
-        console.log(`🚫 Forbidden word detected: "${forbiddenWord}" by ${speaker}`);
+        log.warn(`🚫 Forbidden word detected: "${forbiddenWord}" by ${speaker}`);
         
         if (speaker === 'ai') {
           // AI said forbidden word - unlock it!
@@ -1438,12 +1446,12 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
                     <option value={3000}>3.0 seconds</option>
                     <option value={3500}>3.5 seconds</option>
                     <option value={4000}>4.0 seconds</option>
-                  </select>
-                </label>
+          </select>
+        </label>
                 <div style={{fontSize: "14px", color: "#666", marginTop: "5px"}}>
                   How long to wait before AI responds (longer = more thinking time)
                 </div>
-              </div>
+      </div>
 
               <div style={{marginBottom: "15px"}}>
                 <label style={{fontSize: "16px", fontWeight: "bold", marginRight: "15px"}}>
@@ -1774,8 +1782,8 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
             );
           })}
           
-          {/* Current user message (while speaking) */}
-          {currentUserMessage && (
+          {/* Current user message (while speaking) - only show if not yet in conversation */}
+          {currentUserMessage && !conversation.find(msg => msg.content === currentUserMessage) && (
             <div style={{
               margin: "15px 0",
               padding: "15px 20px",
