@@ -117,11 +117,17 @@ export default function RealtimeClient() {
   }>({});
   const [gameRoundActive, setGameRoundActive] = useState(false);
   
-  // Buzzer popup state 🚨
-  const [buzzerPopup, setBuzzerPopup] = useState<{show: boolean, word: string, message: string}>({
+  // Enhanced buzzer popup state 🚨
+  const [buzzerPopup, setBuzzerPopup] = useState<{
+    show: boolean, 
+    word: string, 
+    message: string,
+    showChoices: boolean
+  }>({
     show: false,
     word: '',
-    message: ''
+    message: '',
+    showChoices: false
   });
   const [recentlyUnlocked, setRecentlyUnlocked] = useState<string[]>([]);
   
@@ -311,25 +317,66 @@ export default function RealtimeClient() {
     setGameRoundActive(false);
     console.log(`🚨 GAME PAUSED - Forbidden word "${word}" used - DEBUG`);
     
-    // Buzzer popup göster
+    // Enhanced buzzer popup with choices - NO TIMER!
     setBuzzerPopup({
       show: true,
       word: word,
-      message: `🚨 BUZZER! Forbidden word used: "${word}"`
+      message: `🚨 BUZZER! Kez used forbidden word "${word}"`,
+      showChoices: true
     });
     
-    // 2 saniye sonra popup'ı kapat
-    setTimeout(() => {
-      setBuzzerPopup(prev => ({ ...prev, show: false }));
-    }, 2000);
+    // DON'T auto-close popup - wait for user choice
+    console.log(`🚨 FORBIDDEN WORD USED: "${word}" - Waiting for user choice - DEBUG`);
+  };
+
+  // Enhanced buzzer popup choice handlers
+  const handleBuzzerContinue = () => {
+    console.log("🔄 User chose to continue with current word from buzzer - DEBUG");
     
-    // DON'T notify AI immediately - wait for user popup response
-    console.log(`🚨 FORBIDDEN WORD USED: "${word}" - Waiting for user popup response - DEBUG`);
+    // Close buzzer popup
+    setBuzzerPopup({
+      show: false,
+      word: '',
+      message: '',
+      showChoices: false
+    });
     
-    // Start hybrid word progression system for forbidden word
-    setTimeout(() => {
-      startWordProgression('forbidden_word');
-    }, 2000); // Give popup time to show
+    // RESUME GAME - Re-enable AI responses
+    setGameRoundActive(true);
+    console.log(`🎮 GAME RESUMED - Continuing with current word - DEBUG`);
+    
+    // AI acknowledgment
+    createSafeResponse(`Great! Let's continue with "${currentWord?.word}". Try describing it in a different way!`);
+  };
+
+  const handleBuzzerNextWord = () => {
+    console.log("➡️ User chose to progress to next word from buzzer - DEBUG");
+    
+    // Close buzzer popup
+    setBuzzerPopup({
+      show: false,
+      word: '',
+      message: '',
+      showChoices: false
+    });
+    
+    // Notify AI about forbidden word usage
+    if (dcRef.current?.readyState === "open") {
+      dcRef.current.send(JSON.stringify({
+        type: "conversation.item.create",
+        item: {
+          type: "message",
+          role: "system",
+          content: [{
+            type: "text",
+            text: `Kez used a forbidden word. Please acknowledge this briefly and announce we're moving to a new word. Be encouraging!`
+          }]
+        }
+      }));
+    }
+    
+    // Progress to next word
+    autoProgressToNextWord();
   };
 
   const getNewTabooWord = () => {
@@ -1102,8 +1149,21 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
                     callback: gameLogicCallback
                   }];
                   console.log(`✅ BUFFERED GAME LOGIC: ${newPendingLogic.length} items - DEBUG`);
-                  // PREVENT DUPLICATE PROCESSING - Only process once per response
-                  console.log(`🔍 PROCESSING CONTROL: Buffered for later processing - DEBUG`);
+                  // SMART PROCESSING - Process immediately but prevent duplicates
+                  setTimeout(() => {
+                    // Only process if this is the latest buffered item
+                    setPendingGameLogic(current => {
+                      if (current.length > 0) {
+                        console.log(`🔄 SMART PROCESSING: ${current.length} buffered items - DEBUG`);
+                        current.forEach((item, index) => {
+                          console.log(`🔄 Processing item ${index + 1}: "${item.aiMessage.substring(0, 50)}..." - DEBUG`);
+                          item.callback();
+                        });
+                        return []; // Clear after processing
+                      }
+                      return current;
+                    });
+                  }, 50);
                   return newPendingLogic;
                 });
                 
@@ -1986,20 +2046,76 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
           }}>
             <div style={{ fontSize: "48px", marginBottom: "10px" }}>🚨</div>
             <div>{buzzerPopup.message}</div>
-            <div style={{ 
-              fontSize: "18px", 
-              marginTop: "10px", 
-              opacity: 0.9,
-              textTransform: "uppercase",
-              letterSpacing: "2px"
-            }}>
-              Moving to next word...
-            </div>
+            
+            {buzzerPopup.showChoices && (
+              <>
+                <div style={{
+                  fontSize: "16px",
+                  marginTop: "15px",
+                  marginBottom: "20px",
+                  opacity: 0.9
+                }}>
+                  What would you like to do?
+                </div>
+                
+                <div style={{ display: "flex", gap: "15px", justifyContent: "center" }}>
+                  <button
+                    onClick={handleBuzzerContinue}
+                    style={{
+                      background: "rgba(255, 255, 255, 0.2)",
+                      color: "white",
+                      border: "2px solid white",
+                      borderRadius: "10px",
+                      padding: "10px 20px",
+                      fontSize: "16px",
+                      fontWeight: "bold",
+                      cursor: "pointer",
+                      transition: "all 0.2s ease",
+                    }}
+                    onMouseOver={(e) => {
+                      e.currentTarget.style.background = "rgba(255, 255, 255, 0.3)";
+                      e.currentTarget.style.transform = "scale(1.05)";
+                    }}
+                    onMouseOut={(e) => {
+                      e.currentTarget.style.background = "rgba(255, 255, 255, 0.2)";
+                      e.currentTarget.style.transform = "scale(1)";
+                    }}
+                  >
+                    🔄 Continue Word
+                  </button>
+                  
+                  <button
+                    onClick={handleBuzzerNextWord}
+                    style={{
+                      background: "rgba(255, 255, 255, 0.2)",
+                      color: "white",
+                      border: "2px solid white",
+                      borderRadius: "10px",
+                      padding: "10px 20px",
+                      fontSize: "16px",
+                      fontWeight: "bold",
+                      cursor: "pointer",
+                      transition: "all 0.2s ease",
+                    }}
+                    onMouseOver={(e) => {
+                      e.currentTarget.style.background = "rgba(255, 255, 255, 0.3)";
+                      e.currentTarget.style.transform = "scale(1.05)";
+                    }}
+                    onMouseOut={(e) => {
+                      e.currentTarget.style.background = "rgba(255, 255, 255, 0.2)";
+                      e.currentTarget.style.transform = "scale(1)";
+                    }}
+                  >
+                    ➡️ Next Word
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         )}
 
-        {/* Word Progression Choice Popup */}
-        {showWordProgression && currentWord && (
+        {/* OLD Word Progression Popup - DISABLED (now using buzzer popup) */}
+        {false && showWordProgression && currentWord && (
           <div style={{
             position: 'fixed',
             bottom: '20px',
