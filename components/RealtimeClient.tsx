@@ -1220,7 +1220,7 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
                   
                   const newPendingLogic = [...prev, {
                     aiMessage: aiMessageContent,
-                    aiTimestamp,
+                    aiTimestamp: new Date(),
                     callback: gameLogicCallback
                   }];
                   console.log(`✅ BUFFERED GAME LOGIC: ${newPendingLogic.length} items - DEBUG`);
