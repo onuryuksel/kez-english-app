@@ -59,6 +59,13 @@ export default function RealtimeClient() {
   }>({});
   const [gameRoundActive, setGameRoundActive] = useState(false);
   
+  // Buzzer popup state 🚨
+  const [buzzerPopup, setBuzzerPopup] = useState<{show: boolean, word: string, message: string}>({
+    show: false,
+    word: '',
+    message: ''
+  });
+  
   // Token usage tracking 💰
   const [sessionUsage, setSessionUsage] = useState<{
     totalTokens: number;
@@ -207,6 +214,18 @@ export default function RealtimeClient() {
   
   const handleUserForbiddenWord = (word: string) => {
     console.log(`❌ User used forbidden word: "${word}"`);
+    
+    // Buzzer popup göster
+    setBuzzerPopup({
+      show: true,
+      word: word,
+      message: `🚨 BUZZER! Forbidden word used: "${word}"`
+    });
+    
+    // 2 saniye sonra popup'ı kapat
+    setTimeout(() => {
+      setBuzzerPopup(prev => ({ ...prev, show: false }));
+    }, 2000);
     
     // AI'a bildir ve yeni kelimeye geç
     if (dcRef.current?.readyState === "open") {
@@ -824,12 +843,21 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
   const currentMode = GAME_MODES[gameMode];
 
   return (
-    <div style={{
-      background: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
-      minHeight: "100vh",
-      padding: "20px",
-      fontFamily: "system-ui"
-    }}>
+    <>
+      {/* CSS Animations */}
+      <style jsx>{`
+        @keyframes buzzerShake {
+          0% { transform: translate(-50%, -50%) rotate(-2deg); }
+          100% { transform: translate(-50%, -50%) rotate(2deg); }
+        }
+      `}</style>
+      
+      <div style={{
+        background: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
+        minHeight: "100vh",
+        padding: "20px",
+        fontFamily: "system-ui"
+      }}>
       <div style={{
         maxWidth: "900px",
         margin: "0 auto",
@@ -854,7 +882,7 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
           <p style={{fontSize: "18px", color: "#666", margin: 0}}>
             Learn English through fun games with instant corrections! 🎯🚀
           </p>
-        </div>
+      </div>
 
         {/* Game Mode Selection */}
         <div style={{marginBottom: "25px"}}>
@@ -1064,15 +1092,15 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
                     <option value={3000}>3.0 seconds</option>
                     <option value={3500}>3.5 seconds</option>
                     <option value={4000}>4.0 seconds</option>
-                  </select>
-                </label>
+          </select>
+        </label>
                 <div style={{fontSize: "14px", color: "#666", marginTop: "5px"}}>
                   How long to wait before AI responds (longer = more thinking time)
                 </div>
               </div>
             </div>
           )}
-        </div>
+      </div>
 
         {/* Taboo Word Card - Only show in Taboo mode */}
         {gameMode === "taboo" && currentWord && (
@@ -1507,6 +1535,39 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
           </div>
         )}
 
+        {/* Buzzer Popup */}
+        {buzzerPopup.show && (
+          <div style={{
+            position: "fixed",
+            top: "50%",
+            left: "50%",
+            transform: "translate(-50%, -50%)",
+            background: "linear-gradient(135deg, #ff4757 0%, #ff3742 100%)",
+            color: "white",
+            padding: "30px 40px",
+            borderRadius: "20px",
+            fontSize: "24px",
+            fontWeight: "bold",
+            textAlign: "center",
+            boxShadow: "0 20px 40px rgba(255, 71, 87, 0.4)",
+            zIndex: 9999,
+            border: "3px solid white",
+            animation: "buzzerShake 0.5s ease-in-out infinite alternate"
+          }}>
+            <div style={{ fontSize: "48px", marginBottom: "10px" }}>🚨</div>
+            <div>{buzzerPopup.message}</div>
+            <div style={{ 
+              fontSize: "18px", 
+              marginTop: "10px", 
+              opacity: 0.9,
+              textTransform: "uppercase",
+              letterSpacing: "2px"
+            }}>
+              Moving to next word...
+            </div>
+          </div>
+        )}
+
         {/* Footer */}
         <div style={{
           textAlign: "center",
@@ -1523,6 +1584,6 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
           </p>
         </div>
       </div>
-    </div>
+    </>
   );
 }
