@@ -666,7 +666,7 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
               color: "#666"
             }}
           >
-            ⚙️ {showAdvanced ? "Hide Settings" : "Speed Settings"}
+            ⚙️ {showAdvanced ? "Hide Settings" : "Settings"}
           </button>
           
           {showAdvanced && (
