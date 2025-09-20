@@ -76,6 +76,7 @@ const GAME_MODES = {
 };
 
 export default function RealtimeClient() {
+  console.log("🚀 RealtimeClient component is rendering!");
   const [connected, setConnected] = useState(false);
   const [pace, setPace] = useState<Pace>("medium");
   const [gameMode, setGameMode] = useState<GameMode>("casual");
