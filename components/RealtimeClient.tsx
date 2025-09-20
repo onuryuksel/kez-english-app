@@ -83,6 +83,18 @@ export default function RealtimeClient() {
   const [conversation, setConversation] = useState<ConversationMessage[]>([]);
   const [currentUserMessage, setCurrentUserMessage] = useState<string>("");
   const [currentAssistantMessage, setCurrentAssistantMessage] = useState<string>("");
+  
+  // Timeline fix: Buffer for proper ordering
+  const [pendingUserMessage, setPendingUserMessage] = useState<{
+    id: string;
+    content: string;
+    timestamp: Date;
+  } | null>(null);
+  const [pendingGameLogic, setPendingGameLogic] = useState<{
+    aiMessage: string;
+    aiTimestamp: Date;
+    callback: () => void;
+  }[]>([]);
   const [showAdvanced, setShowAdvanced] = useState(false);
   
   // Taboo Game States
@@ -387,6 +399,22 @@ export default function RealtimeClient() {
         });
       }
     }
+  };
+
+  // Timeline fix: Process buffered game logic when user transcript arrives
+  const processPendingGameLogic = (userTranscript: string) => {
+    log.debug(`Processing ${pendingGameLogic.length} pending game logic items`);
+    
+    // Execute all pending game logic callbacks
+    pendingGameLogic.forEach(({ callback, aiMessage }, index) => {
+      log.debug(`Executing game logic ${index + 1}: AI said "${aiMessage.substring(0, 50)}..."`);
+      callback();
+    });
+    
+    // Clear pending game logic
+    setPendingGameLogic([]);
+    
+    log.debug("All pending game logic processed");
   };
 
   const handleCorrectGuess = (guessedWord: string, confidence?: number) => {
@@ -707,6 +735,18 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
               // 3 konuşma sonrası optimal ayarları uygula
               setTimeout(() => applyOptimalSettings(), 1000);
             }
+            
+            // Timeline fix: Create placeholder for user message with early timestamp
+            const userTimestamp = new Date();
+            userTimestamp.setMilliseconds(userTimestamp.getMilliseconds() - 100); // Slightly before AI response
+            
+            setPendingUserMessage({
+              id: `user-${userTimestamp.getTime()}`,
+              content: "", // Will be filled when transcript arrives
+              timestamp: userTimestamp
+            });
+            
+            log.debug("Created user message placeholder");
           }
 
           // Kullanıcı konuşma transcript'i
@@ -714,28 +754,34 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
             const transcript = msg.transcript || "";
             log.user("User said:", transcript);
             setCurrentUserMessage(transcript);
-            if (transcript) {
+            
+            if (transcript && pendingUserMessage) {
+              // Timeline fix: Use pending message with early timestamp
+              const userMessage = {
+                id: pendingUserMessage.id,
+                role: "user" as const,
+                content: transcript,
+                timestamp: pendingUserMessage.timestamp,
+                isComplete: true
+              };
+              
               // Taboo forbidden word kontrolü - Kez'in konuşması
               checkForbiddenWords(transcript, 'user');
               
               setConversation(prev => {
-                const timestamp = new Date();
-                // Add small offset to ensure unique timestamp
-                timestamp.setMilliseconds(timestamp.getMilliseconds() + prev.length);
-                
-                const newConversation = [...prev, {
-                  id: `user-${timestamp.getTime()}`,
-                  role: "user" as const,
-                  content: transcript,
-                  timestamp,
-                  isComplete: true
-                }];
-                const timeStr = timestamp.toLocaleTimeString();
+                const newConversation = [...prev, userMessage];
+                const timeStr = userMessage.timestamp.toLocaleTimeString();
                 console.log(`🗣️ KEZ [${timeStr}]: "${transcript}"`);
                 log.success(`Conversation: ${newConversation.length} messages`);
                 return newConversation;
               });
-              setCurrentUserMessage(""); // Temizle
+              
+              // Clear placeholder and current message
+              setPendingUserMessage(null);
+              setCurrentUserMessage(""); 
+              
+              // Process pending game logic now that user message is available
+              processPendingGameLogic(transcript);
             }
           }
           
@@ -799,56 +845,67 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
             }
             
             if (aiMessageContent) {
-              // Taboo forbidden word kontrolü - AI'ın konuşması
-              checkForbiddenWords(aiMessageContent, 'ai');
-              
-              // Backup: Check if AI guessed the word correctly in text
-              if (gameMode === "taboo" && currentWord) {
-                const targetWord = currentWord.word.toLowerCase();
-                const aiText = aiMessageContent.toLowerCase();
-                
-                // Check if AI mentioned the target word in a guess context
-                const guessPatterns = [
-                  `could it be a ${targetWord}`,
-                  `could it be ${targetWord}`,
-                  `is it a ${targetWord}`,
-                  `is it ${targetWord}`,
-                  `be a ${targetWord}`,
-                  `be ${targetWord}`,
-                  ` ${targetWord}?`,
-                  ` ${targetWord} `,
-                ];
-                
-                const foundGuess = guessPatterns.some(pattern => aiText.includes(pattern));
-                
-                if (foundGuess) {
-                  log.game("BACKUP: AI guessed correct word:", targetWord);
-                  // Only process if no function call was detected (backup mechanism)
-                  setTimeout(() => {
-                    if (gameRoundActive) {
-                      handleCorrectGuess(targetWord, 0.9);
-                    }
-                  }, 100); // Small delay to let function call process first
-                }
-              }
+              // Timeline fix: Add AI message to conversation immediately (for UI)
+              const aiTimestamp = new Date();
               
               setConversation(prev => {
-                const timestamp = new Date();
                 // Add small offset to ensure unique timestamp  
-                timestamp.setMilliseconds(timestamp.getMilliseconds() + prev.length);
+                aiTimestamp.setMilliseconds(aiTimestamp.getMilliseconds() + prev.length);
                 
                 const newConversation = [...prev, {
-                  id: `assistant-${timestamp.getTime()}`,
+                  id: `assistant-${aiTimestamp.getTime()}`,
                   role: "assistant" as const, 
                   content: aiMessageContent,
-                  timestamp,
+                  timestamp: aiTimestamp,
                   isComplete: true
                 }];
-                const timeStr = timestamp.toLocaleTimeString();
+                const timeStr = aiTimestamp.toLocaleTimeString();
                 console.log(`🎯 AI [${timeStr}]: "${aiMessageContent}"`);
                 log.success(`AI message added. Total: ${newConversation.length}`);
                 return newConversation;
               });
+
+              // Timeline fix: Buffer game logic for when user transcript arrives
+              if (gameMode === "taboo" && currentWord) {
+                const gameLogicCallback = () => {
+                  // Process forbidden words in AI message
+                  checkForbiddenWords(aiMessageContent, 'ai');
+                  
+                  // Backup guess detection (fallback mechanism)
+                  const targetWord = currentWord.word.toLowerCase();
+                  const aiText = aiMessageContent.toLowerCase();
+                  
+                  // Check if AI mentioned the target word in a guess context
+                  const guessPatterns = [
+                    `could it be a ${targetWord}`,
+                    `could it be ${targetWord}`,
+                    `is it a ${targetWord}`,
+                    `is it ${targetWord}`,
+                    `be a ${targetWord}`,
+                    `be ${targetWord}`,
+                    ` ${targetWord}?`,
+                    ` ${targetWord} `,
+                  ];
+                  
+                  const foundGuess = guessPatterns.some(pattern => aiText.includes(pattern));
+                  
+                  if (foundGuess && gameRoundActive) {
+                    log.game("BACKUP: AI guessed correct word:", targetWord);
+                    handleCorrectGuess(targetWord, 0.9);
+                  }
+                };
+                
+                setPendingGameLogic(prev => [...prev, {
+                  aiMessage: aiMessageContent,
+                  aiTimestamp,
+                  callback: gameLogicCallback
+                }]);
+                
+                log.debug("Buffered game logic for user transcript");
+              } else {
+                // For non-taboo modes, process immediately
+                checkForbiddenWords(aiMessageContent, 'ai');
+              }
               
               // Clear current message immediately after adding to conversation
               setCurrentAssistantMessage("");
