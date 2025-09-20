@@ -99,6 +99,14 @@ export default function RealtimeClient() {
   const dcRef = useRef<RTCDataChannel|null>(null);
   const micStreamRef = useRef<MediaStream|null>(null);
   const audioRef = useRef<HTMLAudioElement|null>(null);
+  const conversationEndRef = useRef<HTMLDivElement>(null);
+
+  // Auto-scroll to bottom when new messages are added
+  useEffect(() => {
+    if (conversationEndRef.current) {
+      conversationEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [conversation, currentUserMessage, currentAssistantMessage]);
 
   // Push-to-talk functionality
   useEffect(() => {
@@ -1275,16 +1283,22 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
           border: `3px solid ${currentMode.color}`, 
           borderRadius: "20px", 
           padding: "20px", 
-          maxHeight: "500px", 
+          height: "600px", // Fixed height for consistent scrolling
           overflowY: "auto",
+          overflowX: "hidden",
           background: `linear-gradient(135deg, ${currentMode.bgColor} 0%, white 100%)`,
-          marginBottom: "20px"
+          marginBottom: "20px",
+          display: "flex",
+          flexDirection: "column"
         }}>
           <div style={{
             display: "flex",
             alignItems: "center",
             justifyContent: "space-between",
-            marginBottom: "20px"
+            marginBottom: "20px",
+            flexShrink: 0, // Don't shrink header
+            paddingBottom: "15px",
+            borderBottom: "2px solid rgba(255,255,255,0.3)"
           }}>
             <h3 style={{
               margin: 0, 
@@ -1294,16 +1308,6 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
             }}>
               {currentMode.name} Conversation
             </h3>
-            <div style={{
-              padding: "8px 15px",
-              background: currentMode.color,
-              color: "white",
-              borderRadius: "20px",
-              fontSize: "14px",
-              fontWeight: "bold"
-            }}>
-              {conversation.length} messages
-            </div>
             
             {/* Debug conversation array */}
             {process.env.NODE_ENV === 'development' && (
@@ -1318,9 +1322,16 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
                 DEBUG: {conversation.map(m => `${m.role}:${m.content.substring(0,20)}...`).join(" | ")}
               </div>
             )}
-      </div>
+          </div>
 
-          {conversation.length === 0 && !currentUserMessage && !currentAssistantMessage && (
+          {/* Scrollable messages area */}
+          <div style={{
+            flex: 1, // Take remaining space
+            overflowY: "auto",
+            overflowX: "hidden",
+            paddingRight: "10px" // Space for scrollbar
+          }}>
+            {conversation.length === 0 && !currentUserMessage && !currentAssistantMessage && (
             <div style={{
               textAlign: "center",
               padding: "40px",
@@ -1447,6 +1458,10 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
               </div>
             </div>
           )}
+          
+          {/* Invisible div for auto-scroll target */}
+          <div ref={conversationEndRef} style={{ height: "1px" }} />
+          </div> {/* End of scrollable messages area */}
         </div>
 
         {/* Token Usage Stats */}
