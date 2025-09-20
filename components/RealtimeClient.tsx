@@ -297,7 +297,7 @@ export default function RealtimeClient() {
     setForbiddenWordStatus(prev => {
       const newStatus = {
         ...prev,
-        [word]: 'unlocked'
+        [word]: 'unlocked' as const
       };
       
       // Debug log with updated status
@@ -2209,7 +2209,7 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
           }}>
             <div style={{ fontSize: '16px', fontWeight: 'bold', marginBottom: '12px' }}>
               {progressionReason === 'correct_guess' ? (
-                <>🎉 Excellent! <strong>"{currentWord.word}"</strong> was correct!</>
+                <>🎉 Excellent! <strong>"{currentWord?.word}"</strong> was correct!</>
               ) : (
                 <>🚨 Oops! Forbidden word used</>
               )}
@@ -2237,7 +2237,7 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
                 onMouseOver={(e) => e.currentTarget.style.background = 'rgba(255, 255, 255, 0.3)'}
                 onMouseOut={(e) => e.currentTarget.style.background = 'rgba(255, 255, 255, 0.2)'}
               >
-                🔄 Continue with<br/>"{currentWord.word}"
+                🔄 Continue with<br/>"{currentWord?.word}"
               </button>
               
               <button 
