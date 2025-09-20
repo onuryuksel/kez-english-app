@@ -427,10 +427,6 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
           input_audio_transcription: {
             model: "whisper-1",
             language: "en" // Kullanıcı transcription İngilizce zorla
-          },
-          output_audio_transcription: {
-            model: "whisper-1",
-            language: "en" // AI transcription da İngilizce zorla
           }
         }
       }));
