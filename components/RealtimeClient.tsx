@@ -389,11 +389,22 @@ export default function RealtimeClient() {
     }
   };
 
-  const handleCorrectGuess = (guessedWord: string, confidence: number) => {
+  const handleCorrectGuess = (guessedWord: string, confidence?: number) => {
+    // Prevent duplicate calls - check if we're already processing this word
+    if (!currentWord || gameRoundActive === false) {
+      log.warn("Ignoring duplicate guess or round not active");
+      return;
+    }
+    
+    log.game(`Correct guess processed: "${guessedWord}" for word "${currentWord.word}"`);
+    
     // Skor artır
     setTabooScore(prev => prev + 1);
     
-    // AI'a başarı mesajı gönder
+    // Round'u pause et to prevent further processing
+    setGameRoundActive(false);
+    
+    // AI'a başarı mesajı gönder (tek sefer)
     if (dcRef.current?.readyState === "open") {
       dcRef.current.send(JSON.stringify({
         type: "conversation.item.create",
@@ -406,11 +417,21 @@ export default function RealtimeClient() {
           }]
         }
       }));
+
+      // AI'dan response iste
+      dcRef.current.send(JSON.stringify({
+        type: "response.create",
+        response: {
+          modalities: ["text", "audio"],
+          instructions: "Celebrate the correct guess and move to the next word!"
+        }
+      }));
     }
     
     // Yeni kelimeye geç
     setTimeout(() => {
       getNewTabooWord();
+      setGameRoundActive(true); // Resume round
     }, 3000);
   };
 
@@ -706,6 +727,7 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
                   isComplete: true
                 }];
                 log.success(`Conversation: ${newConversation.length} messages`);
+                console.log(`🗣️ KEZ: "${transcript}"`);
                 return newConversation;
               });
               setCurrentUserMessage(""); // Temizle
@@ -795,9 +817,13 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
                 const foundGuess = guessPatterns.some(pattern => aiText.includes(pattern));
                 
                 if (foundGuess) {
-                  log.game("AI guessed correct word:", targetWord);
-                  // Process immediately since function calls may not be reliable
-                  handleCorrectGuess(targetWord);
+                  log.game("BACKUP: AI guessed correct word:", targetWord);
+                  // Only process if no function call was detected (backup mechanism)
+                  setTimeout(() => {
+                    if (gameRoundActive) {
+                      handleCorrectGuess(targetWord, 0.9);
+                    }
+                  }, 100); // Small delay to let function call process first
                 }
               }
               
@@ -810,6 +836,7 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
                   isComplete: true
                 }];
                 log.success(`AI message added. Total: ${newConversation.length}`);
+                console.log(`🎯 AI: "${aiMessageContent}"`);
                 return newConversation;
               });
               
@@ -1397,18 +1424,6 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
             </h3>
             
             {/* Debug conversation array */}
-            {process.env.NODE_ENV === 'development' && (
-              <div style={{
-                fontSize: "12px",
-                color: "#666",
-                marginTop: "5px",
-                padding: "5px",
-                background: "#f0f0f0",
-                borderRadius: "5px"
-              }}>
-                DEBUG: {conversation.map(m => `${m.role}:${m.content.substring(0,20)}...`).join(" | ")}
-              </div>
-            )}
           </div>
 
           {/* Scrollable messages area */}
@@ -1435,7 +1450,9 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
             </div>
           )}
           
-          {conversation.map((msg) => {
+          {conversation
+            .sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime())
+            .map((msg) => {
             // Taboo modunda AI'nin tahminlerini özel göster
             const isTabooGuess = gameMode === "taboo" && msg.role === "assistant" && 
               currentWord && msg.content.toLowerCase().includes(currentWord.word.toLowerCase());
