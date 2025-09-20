@@ -65,6 +65,7 @@ export default function RealtimeClient() {
     word: '',
     message: ''
   });
+  const [recentlyUnlocked, setRecentlyUnlocked] = useState<string[]>([]);
   
   // Token usage tracking 💰
   const [sessionUsage, setSessionUsage] = useState<{
@@ -197,14 +198,22 @@ export default function RealtimeClient() {
   };
   
   const unlockForbiddenWord = (word: string) => {
+    console.log(`🔓 AI used forbidden word "${word}" - UNLOCKING IT!`);
+    
     setForbiddenWordStatus(prev => ({
       ...prev,
       [word]: 'unlocked'
     }));
     
-    console.log(`✅ Word unlocked by AI: "${word}"`);
+    // Animation için recently unlocked'a ekle
+    setRecentlyUnlocked(prev => [...prev, word]);
     
-    // AI'a bildir
+    // 3 saniye sonra animation'ı kaldır
+    setTimeout(() => {
+      setRecentlyUnlocked(prev => prev.filter(w => w !== word));
+    }, 3000);
+    
+    // AI'a unlock durumunu bildir
     if (dcRef.current?.readyState === "open") {
       dcRef.current.send(JSON.stringify({
         type: "conversation.item.create",
@@ -213,9 +222,14 @@ export default function RealtimeClient() {
           role: "user",
           content: [{ 
             type: "input_text", 
-            text: `Great! You said "${word}" so now Kez can use that word too. Keep guessing!` 
+            text: `🔓 GREAT! You just said "${word}" which was forbidden, so now it's UNLOCKED! Kez can use "${word}" freely now. Continue guessing the word!` 
           }]
         }
+      }));
+      
+      // AI'dan response iste
+      dcRef.current.send(JSON.stringify({
+        type: "response.create"
       }));
     }
   };
@@ -655,7 +669,7 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
               setConversation(prev => {
                 const newConversation = [...prev, {
                   id: `user-${Date.now()}`,
-                  role: "user",
+                  role: "user" as const,
                   content: transcript,
                   timestamp: new Date(),
                   isComplete: true
@@ -724,7 +738,7 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
               setConversation(prev => {
                 const newConversation = [...prev, {
                   id: `assistant-${Date.now()}`,
-                  role: "assistant", 
+                  role: "assistant" as const, 
                   content: currentAssistantMessage,
                   timestamp: new Date(),
                   isComplete: true
@@ -860,12 +874,24 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
   const currentMode = GAME_MODES[gameMode];
 
   return (
-    <div style={{
-      background: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
-      minHeight: "100vh",
-      padding: "20px",
-      fontFamily: "system-ui"
-    }}>
+    <>
+      <style dangerouslySetInnerHTML={{
+        __html: `
+          @keyframes shake {
+            0%, 100% { transform: translateX(0px) rotate(0deg); }
+            25% { transform: translateX(-2px) rotate(-1deg); }
+            50% { transform: translateX(2px) rotate(1deg); }
+            75% { transform: translateX(-1px) rotate(-0.5deg); }
+          }
+        `
+      }} />
+      
+      <div style={{
+        background: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
+        minHeight: "100vh",
+        padding: "20px",
+        fontFamily: "system-ui"
+      }}>
       <div style={{
         maxWidth: "900px",
         margin: "0 auto",
@@ -1214,6 +1240,7 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
             }}>
               {currentWord.forbidden.map((word, index) => {
                 const isUnlocked = forbiddenWordStatus[word] === 'unlocked';
+                const isRecentlyUnlocked = recentlyUnlocked.includes(word);
                 return (
                   <div
                     key={index}
@@ -1223,12 +1250,13 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
                       padding: "8px 15px",
                       borderRadius: "25px",
                       fontSize: "16px",
+                      transform: isRecentlyUnlocked ? "scale(1.1)" : isUnlocked ? "scale(0.95)" : "scale(1)",
+                      animation: isRecentlyUnlocked ? "shake 0.5s ease-in-out 3" : "none",
                       fontWeight: "bold",
                       border: isUnlocked ? "2px solid #4CAF50" : "2px solid white",
                       textDecoration: isUnlocked ? "line-through" : "none",
                       opacity: isUnlocked ? 0.8 : 1,
-                      transition: "all 0.3s ease",
-                      transform: isUnlocked ? "scale(0.95)" : "scale(1)"
+                      transition: "all 0.3s ease"
                     }}
                   >
                     {isUnlocked ? "✅" : "🚫"} {word}
@@ -1614,5 +1642,6 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
         </div>
       </div>
     </div>
+    </>
   );
 }
