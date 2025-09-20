@@ -302,6 +302,10 @@ export default function RealtimeClient() {
   const handleUserForbiddenWord = (word: string) => {
     log.warn(`User used forbidden word: "${word}"`);
     
+    // PAUSE GAME - Prevent AI from responding during popup
+    setGameRoundActive(false);
+    console.log(`🚨 GAME PAUSED - Forbidden word "${word}" used - DEBUG`);
+    
     // Buzzer popup göster
     setBuzzerPopup({
       show: true,
@@ -314,28 +318,13 @@ export default function RealtimeClient() {
       setBuzzerPopup(prev => ({ ...prev, show: false }));
     }, 2000);
     
-    // AI'a bildir ve yeni kelimeye geç
-    if (dcRef.current?.readyState === "open") {
-      dcRef.current.send(JSON.stringify({
-        type: "conversation.item.create",
-        item: {
-          type: "message",
-          role: "user",
-          content: [{ 
-            type: "input_text", 
-            text: `🚨 BUZZER! Kez used the forbidden word "${word}". Please tell her this was forbidden and we're moving to a new word. Be encouraging and stay in Taboo game mode!` 
-          }]
-        }
-      }));
-      
-      // Safe AI response request
-      createSafeResponse(`🚨 Oops! "${word}" was a forbidden word, Kez! No worries, that happens to everyone!`);
-    }
+    // DON'T notify AI immediately - wait for user popup response
+    console.log(`🚨 FORBIDDEN WORD USED: "${word}" - Waiting for user popup response - DEBUG`);
     
     // Start hybrid word progression system for forbidden word
     setTimeout(() => {
       startWordProgression('forbidden_word');
-    }, 2000); // Give AI time to acknowledge first
+    }, 2000); // Give popup time to show
   };
 
   const getNewTabooWord = () => {
@@ -510,8 +499,9 @@ export default function RealtimeClient() {
     }
     setShowWordProgression(false);
     
-    // Reset game round state
+    // RESUME GAME - Re-enable AI responses
     setGameRoundActive(true);
+    console.log(`🎮 GAME RESUMED - Continuing with current word - DEBUG`);
     
     // AI acknowledgment
     createSafeResponse(`Great! Let's continue with "${currentWord?.word}". Try describing it in a different way!`);
@@ -526,6 +516,21 @@ export default function RealtimeClient() {
       setProgressionTimer(null);
     }
     setShowWordProgression(false);
+    
+    // Notify AI about forbidden word usage ONLY when progressing
+    if (dcRef.current?.readyState === "open") {
+      dcRef.current.send(JSON.stringify({
+        type: "conversation.item.create",
+        item: {
+          type: "message",
+          role: "system",
+          content: [{
+            type: "text",
+            text: `Kez used a forbidden word. Please acknowledge this briefly and announce we're moving to a new word. Be encouraging!`
+          }]
+        }
+      }));
+    }
     
     // Progress to next word
     autoProgressToNextWord();
@@ -548,18 +553,22 @@ export default function RealtimeClient() {
     setTimeout(() => {
       getNewTabooWord();
       setGameRoundActive(true);
+      console.log(`🎮 GAME RESUMED - New word started - DEBUG`);
     }, 2000);
   };
 
-  // Safe Response Creation: Always cancel before create to prevent API errors
+  // Safe Response Creation: Check if response is active before cancelling
   const createSafeResponse = (instructions: string, delay: number = 100) => {
     if (dcRef.current?.readyState === "open") {
-      // Always cancel any active response first (safe operation)
-      dcRef.current.send(JSON.stringify({
-        type: "response.cancel"
-      }));
-      
-      log.debug("🛑 Cancelled active response");
+      // Only cancel if there's an active response (to prevent API errors)
+      if (currentAssistantMessage) {
+        dcRef.current.send(JSON.stringify({
+          type: "response.cancel"
+        }));
+        console.log("🛑 Cancelled active response - DEBUG");
+      } else {
+        console.log("🔍 No active response to cancel - DEBUG");
+      }
       
       // Wait for cancellation, then create new response
       setTimeout(() => {
@@ -959,7 +968,7 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
               // Use setTimeout to ensure state updates are processed
               setTimeout(() => {
                 processPendingGameLogic(transcript);
-              }, 10);
+              }, 100);
             }
           }
           
@@ -1078,6 +1087,18 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
                     callback: gameLogicCallback
                   }];
                   console.log(`✅ BUFFERED GAME LOGIC: ${newPendingLogic.length} items - DEBUG`);
+                  // Immediately process if no user transcript is pending
+                  setTimeout(() => {
+                    if (newPendingLogic.length > 0) {
+                      console.log(`🔄 Auto-processing ${newPendingLogic.length} buffered game logic items - DEBUG`);
+                      newPendingLogic.forEach(item => {
+                        console.log(`🔄 Processing buffered item: "${item.aiMessage}" - DEBUG`);
+                        item.callback();
+                      });
+                      // Clear processed items
+                      setPendingGameLogic([]);
+                    }
+                  }, 50);
                   return newPendingLogic;
                 });
                 
