@@ -648,7 +648,7 @@ export default function RealtimeClient() {
     
     // RATE LIMITING: Prevent rapid successive calls
     const now = Date.now();
-    if (now - lastResponseTimeRef.current < 500) { // 500ms cooldown
+    if (now - lastResponseTimeRef.current < 1500) { // Increased to 1500ms cooldown
       console.log("🚫 RATE LIMITED: Too many createSafeResponse calls - DEBUG");
       return;
     }
@@ -1085,6 +1085,8 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
                 
                 // Taboo forbidden word kontrolü - Kez'in konuşması
                 checkForbiddenWords(transcript, 'user');
+              } else {
+                console.log(`❌ NO PENDING USER MESSAGE for transcript: "${transcript}" - DEBUG`);
               }
               
               // Clear placeholder and current message
