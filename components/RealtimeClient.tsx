@@ -796,10 +796,8 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
                 
                 if (foundGuess) {
                   log.game("AI guessed correct word:", targetWord);
-                  // Give small delay to let function call process first
-                  setTimeout(() => {
-                    handleCorrectGuess(targetWord);
-                  }, 500);
+                  // Process immediately since function calls may not be reliable
+                  handleCorrectGuess(targetWord);
                 }
               }
               
@@ -814,7 +812,10 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
                 log.success(`AI message added. Total: ${newConversation.length}`);
                 return newConversation;
               });
-              setCurrentAssistantMessage(""); // Temizle
+              
+              // Clear current message immediately after adding to conversation
+              setCurrentAssistantMessage("");
+              log.debug("Cleared current assistant message");
             } else {
               log.warn("AI message was empty from all sources");
             }
@@ -1532,8 +1533,7 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
               borderRadius: "15px",
               background: `linear-gradient(135deg, ${currentMode.color} 0%, ${currentMode.color}90 100%)`,
               color: "white",
-              opacity: 0.8,
-              animation: "pulse 1.5s infinite",
+              opacity: 0.9,
               boxShadow: "0 4px 15px rgba(0,0,0,0.1)"
             }}>
               <div style={{fontSize: "14px", opacity: 0.9, marginBottom: "8px", fontWeight: "bold"}}>
