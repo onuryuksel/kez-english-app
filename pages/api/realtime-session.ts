@@ -24,8 +24,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         model: "whisper-1",
         language: "en"
       },
-      // Enhanced noise reduction for better background noise filtering
-      input_audio_noise_reduction: true,
+      // Enhanced noise reduction for better background noise filtering - removed due to API compatibility
+      // input_audio_noise_reduction: true,
       turn_detection: { 
         type: "server_vad", 
         threshold: 0.9, // Higher threshold for better noise filtering

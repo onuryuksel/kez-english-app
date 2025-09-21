@@ -1470,9 +1470,8 @@ Wait for Kez to describe something, then guess! 🎲`;
             
             if (transcript) {
               // REAL-TIME UI: Use same logic as console - add message directly
-              // Use sequence-based timestamp to ensure correct chronological order
-              const baseTime = Date.now();
-              const userTimestamp = new Date(baseTime + messageSequenceRef.current * 1000); // Add seconds based on sequence
+              // Use actual timestamp for user messages (they happen when they happen)
+              const userTimestamp = new Date();
               const currentSeq = messageSequenceRef.current;
               messageSequenceRef.current += 1;
               
@@ -1498,7 +1497,7 @@ Wait for Kez to describe something, then guess! 🎲`;
               setConversation(prev => [...prev, userMessage]);
               console.log(`✅ USER MESSAGE ADDED DIRECTLY: "${transcript}" [${userTimestamp.toLocaleTimeString()}] - Sequence: ${currentSeq} - DEBUG`);
               console.log(`🔍 CONVERSATION ORDER DEBUG - Total messages: ${conversation.length + 1}, Latest sequence: ${currentSeq}`);
-              console.log(`⏰ TIMESTAMP DEBUG - User: ${userTimestamp.getTime()}, Formatted: ${userTimestamp.toLocaleTimeString()}`);
+              console.log(`⏰ TIMESTAMP DEBUG - User: ${userTimestamp.getTime()}, Formatted: ${userTimestamp.toLocaleTimeString()} (REAL TIME)`);
               
               // Taboo forbidden word kontrolü - Kez'in konuşması
               checkForbiddenWords(transcript, 'user');
@@ -1585,10 +1584,16 @@ Wait for Kez to describe something, then guess! 🎲`;
                 return; // Skip processing
               }
               
-              // REAL-TIME UI: Add AI message with actual content (no placeholder)
-              // Use sequence-based timestamp to ensure correct chronological order
-              const baseTime = Date.now();
-              const aiTimestamp = new Date(baseTime + messageSequenceRef.current * 1000); // Add seconds based on sequence
+              // REAL-TIME UI: Add AI message with actual content (no placeholder)  
+              // Use actual timestamp but ensure it's after the last user message
+              const now = Date.now();
+              const lastUserTime = conversation
+                .filter(msg => msg.role === "user")
+                .map(msg => msg.timestamp.getTime())
+                .sort((a, b) => b - a)[0] || 0;
+              
+              // Ensure AI timestamp is at least 1 second after last user message
+              const aiTimestamp = new Date(Math.max(now, lastUserTime + 1000));
               const currentSeq = messageSequenceRef.current;
               messageSequenceRef.current += 1;
               
@@ -1604,7 +1609,7 @@ Wait for Kez to describe something, then guess! 🎲`;
               setConversation(prev => [...prev, finalAiMessage]);
               console.log(`✅ AI MESSAGE ADDED: "${aiMessageContent}" [${aiTimestamp.toLocaleTimeString()}] - Sequence: ${currentSeq} - DEBUG`);
               console.log(`🔍 CONVERSATION ORDER DEBUG - Total messages: ${conversation.length + 1}, Latest sequence: ${currentSeq}`);
-              console.log(`⏰ TIMESTAMP DEBUG - AI: ${aiTimestamp.getTime()}, Formatted: ${aiTimestamp.toLocaleTimeString()}`);
+              console.log(`⏰ TIMESTAMP DEBUG - AI: ${aiTimestamp.getTime()}, Formatted: ${aiTimestamp.toLocaleTimeString()} (SMART TIME: at least 1s after last user)`);
               
               // Check if this is coach feedback and store the session
               if (isInFeedbackModeRef.current && feedbackSessionStart && currentWord) {
