@@ -1,6 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 import { TABOO_WORDS } from "../lib/tabooWords";
 import { GAME_MODE_PROMPTS } from "../lib/coachPrompt";
+import { 
+  storeFeedbackSession, 
+  generateWeeklyAnalysis, 
+  getUserProgress, 
+  getSessionsThisWeek,
+  type FeedbackSession 
+} from "../utils/feedbackStorage";
+import { ProgressDashboard } from "./ProgressDashboard";
 
 // Log levels for cleaner debugging
 const LOG_LEVELS = {
@@ -44,7 +52,7 @@ type GameMode = "casual"|"roleplay"|"taboo";
 
 interface ConversationMessage {
   id: string;
-  role: "user" | "assistant";
+  role: "user" | "assistant" | "system";
   content: string;
   timestamp: Date;
   isComplete: boolean;
@@ -79,12 +87,18 @@ export default function RealtimeClient() {
   console.log("🚀 RealtimeClient component is rendering!");
   const [connected, setConnected] = useState(false);
   const [pace, setPace] = useState<Pace>("medium");
-  const [gameMode, setGameMode] = useState<GameMode>("casual");
+  const [gameMode, setGameMode] = useState<GameMode>("taboo");
   const [status, setStatus] = useState<string>("ready");
   const [lastJson, setLastJson] = useState<any>(null);
   const [conversation, setConversation] = useState<ConversationMessage[]>([]);
   const [currentUserMessage, setCurrentUserMessage] = useState<string>("");
   const [currentAssistantMessage, setCurrentAssistantMessage] = useState<string>("");
+  const [isInFeedbackMode, setIsInFeedbackMode] = useState<boolean>(false);
+  const isInFeedbackModeRef = useRef<boolean>(false);
+  const [currentWordGuessed, setCurrentWordGuessed] = useState<boolean>(false);
+  const [userDescriptionForFeedback, setUserDescriptionForFeedback] = useState<string>("");
+  const [feedbackSessionStart, setFeedbackSessionStart] = useState<Date | null>(null);
+  const [showProgressDashboard, setShowProgressDashboard] = useState<boolean>(false);
   const messageSequenceRef = useRef(0);
   
   // Timeline fix: Buffer for proper ordering
@@ -119,7 +133,25 @@ export default function RealtimeClient() {
   const [forbiddenWordStatus, setForbiddenWordStatus] = useState<{
     [word: string]: 'active' | 'unlocked'
   }>({});
+  const forbiddenWordStatusRef = useRef<{[word: string]: 'active' | 'unlocked'}>({});
+  const currentWordRef = useRef<typeof TABOO_WORDS[0] | null>(null);
   const [gameRoundActive, setGameRoundActive] = useState(false);
+  
+  // Keep ref in sync with state
+  useEffect(() => {
+    forbiddenWordStatusRef.current = forbiddenWordStatus;
+  }, [forbiddenWordStatus]);
+
+  useEffect(() => {
+    currentWordRef.current = currentWord;
+    console.log(`🔧 CURRENT WORD REF SYNC: ${currentWord?.word || 'null'} - DEBUG`);
+  }, [currentWord]);
+  
+  // Synchronize feedback mode ref with state
+  useEffect(() => {
+    isInFeedbackModeRef.current = isInFeedbackMode;
+    console.log(`🔧 FEEDBACK MODE REF SYNC: ${isInFeedbackMode}`);
+  }, [isInFeedbackMode]);
   
   // Enhanced buzzer popup state 🚨
   const [buzzerPopup, setBuzzerPopup] = useState<{
@@ -246,30 +278,39 @@ export default function RealtimeClient() {
   // Forbidden word analysis
   const checkForbiddenWords = (text: string, speaker: 'user' | 'ai') => {
     log.debug(`🔍 Checking forbidden words for ${speaker}: "${text}"`);
-    log.debug(`🎮 Current word: ${currentWord?.word}, Round active: ${gameRoundActive}`);
     
-    if (!currentWord || !gameRoundActive) {
+    // Use REF for immediate access to current word (not stale React state)
+    const currentWordRef_current = currentWordRef.current;
+    log.debug(`🎮 Current word: ${currentWordRef_current?.word}, Round active: ${gameRoundActive}`);
+    
+    // 🎓 SKIP forbidden word detection during feedback mode
+    if (isInFeedbackModeRef.current) {
+      log.debug("🎓 FEEDBACK MODE: Skipping forbidden word check - game paused for coaching");
+      return;
+    }
+    
+    if (!currentWordRef_current || !gameRoundActive) {
       log.debug("❌ Skipping forbidden word check - no current word or round not active");
       return;
     }
     
     const lowerText = text.toLowerCase();
     
-    // Get CURRENT state (not stale)
-    const currentStatus = forbiddenWordStatus;
+    // Get CURRENT state (not stale) using useRef for immediate access
+    const currentStatus = forbiddenWordStatusRef.current;
     console.log(`🔍 CURRENT FORBIDDEN WORD STATUS: ${JSON.stringify(currentStatus)} - DEBUG`);
     
-    const activeForbiddenWords = currentWord.forbidden.filter(word => 
+    const activeForbiddenWords = currentWordRef_current.forbidden.filter((word: string) => 
       currentStatus[word] !== 'unlocked'
     );
-    const unlockedWords = currentWord.forbidden.filter(word => 
+    const unlockedWords = currentWordRef_current.forbidden.filter((word: string) => 
       currentStatus[word] === 'unlocked'
     );
     
     console.log(`🚫 ACTIVE forbidden words: [${activeForbiddenWords.join(', ')}] - DEBUG`);
     console.log(`🔓 UNLOCKED forbidden words: [${unlockedWords.join(', ')}] - DEBUG`);
     
-    for (const forbiddenWord of currentWord.forbidden) {
+    for (const forbiddenWord of currentWordRef_current.forbidden) {
       if (lowerText.includes(forbiddenWord.toLowerCase())) {
         const isUnlocked = currentStatus[forbiddenWord] === 'unlocked';
         
@@ -300,6 +341,9 @@ export default function RealtimeClient() {
         ...prev,
         [word]: 'unlocked' as const
       };
+      
+      // Update ref immediately for immediate access
+      forbiddenWordStatusRef.current = newStatus;
       
       // Debug log with updated status
       console.log(`🔓 WORD UNLOCKED: "${word}" - New status: ${JSON.stringify(newStatus)} - DEBUG`);
@@ -336,11 +380,39 @@ export default function RealtimeClient() {
   const handleUserForbiddenWord = (word: string) => {
     log.warn(`User used forbidden word: "${word}"`);
     
-    // PAUSE GAME - Prevent AI from responding during popup
+    // 1. IMMEDIATELY STOP AI SPEAKING
+    if (dcRef.current && dcRef.current.readyState === "open") {
+      dcRef.current.send(JSON.stringify({
+        type: "response.cancel"
+      }));
+      console.log("⏹️ CANCELLED ACTIVE AI RESPONSE - Forbidden word detected");
+    }
+    
+    // 2. PAUSE GAME - Prevent AI from responding during popup
     setGameRoundActive(false);
     console.log(`🚨 GAME PAUSED - Forbidden word "${word}" used - DEBUG`);
     
-    // Enhanced buzzer popup with choices - NO TIMER!
+    // 3. NOTIFY AI ABOUT FORBIDDEN WORD
+    if (dcRef.current && dcRef.current.readyState === "open") {
+      const notification = {
+        type: "conversation.item.create",
+        item: {
+          type: "message",
+          role: "system",
+          content: [{
+            type: "input_text",
+            text: `🚨 GAME EVENT: Kez used forbidden word "${word}". You should acknowledge this was forbidden and wait for the next instruction. Do not continue with the previous topic.`
+          }]
+        }
+      };
+      dcRef.current.send(JSON.stringify(notification));
+      console.log(`📢 NOTIFIED AI: Forbidden word "${word}" used`);
+    }
+    
+    // 4. CLEAR ANY CURRENT AI MESSAGE
+    setCurrentAssistantMessage("");
+    
+    // 5. Enhanced buzzer popup with choices - NO TIMER!
     setBuzzerPopup({
       show: true,
       word: word,
@@ -394,7 +466,7 @@ export default function RealtimeClient() {
           type: "message",
           role: "system",
           content: [{
-            type: "text",
+            type: "input_text",
             text: `Kez used a forbidden word. Please acknowledge this briefly and announce we're moving to a new word. Be encouraging!`
           }]
         }
@@ -403,6 +475,267 @@ export default function RealtimeClient() {
     
     // Progress to next word
     autoProgressToNextWord();
+  };
+
+  // NEW: Get feedback from coach about how to describe word
+  const handleGetCoachFeedback = async () => {
+    if (!currentWord) return;
+    
+    console.log("📝 User requested coach feedback for:", currentWord.word);
+    
+    // First close the buzzer popup and activate feedback mode
+    setBuzzerPopup({
+      show: false,
+      word: '',
+      message: '',
+      showChoices: false,
+      type: 'forbidden'
+    });
+    setGameRoundActive(true); // Resume game for AI responses
+    setIsInFeedbackMode(true); // Activate feedback mode
+    isInFeedbackModeRef.current = true; // Immediate ref update for synchronous access
+    setFeedbackSessionStart(new Date()); // Start timing the feedback session
+    
+    console.log("💬 FEEDBACK MODE ACTIVATED - AI should be able to respond now");
+    
+    // Check connection status and recover if needed
+    if (!dcRef.current || dcRef.current.readyState !== "open") {
+      console.log("🔌 DataChannel closed, attempting full reconnection...");
+      
+      try {
+        // Clean up old connection
+        if (pcRef.current) {
+          pcRef.current.close();
+        }
+        
+      // Start fresh connection
+      await connect();
+      
+      // Wait for connection to stabilize, then send feedback
+      setTimeout(() => {
+        // Double-check connection after reconnect
+        if (dcRef.current && dcRef.current.readyState === "open") {
+          sendFeedbackRequest();
+        } else {
+          console.error("❌ Reconnection failed - DataChannel still not ready");
+          alert("Reconnection failed! Please refresh the page.");
+        }
+      }, 3000); // Increased wait time
+        
+      } catch (error) {
+        console.error("❌ Reconnection failed:", error);
+        alert("Connection failed! Please refresh the page.");
+        return;
+      }
+    } else {
+      // Connection is good, wait for any ongoing DataChannel operations to complete
+      console.log("✅ DataChannel ready, sending feedback request");
+      // Wait for React state updates AND any ongoing DataChannel operations - increased to 1000ms
+      setTimeout(() => {
+        sendFeedbackRequest();
+      }, 1000);
+    }
+  };
+  
+  // Helper function to send feedback request
+  const sendFeedbackRequest = () => {
+    if (!currentWord) return;
+    
+    console.log(`📢 Sending feedback request to AI coach`);
+    console.log(`🔍 FEEDBACK REQUEST DEBUG - gameRoundActive: ${gameRoundActive}, buzzerPopup.show: ${buzzerPopup.show}, isInFeedbackMode: ${isInFeedbackMode}, REF: ${isInFeedbackModeRef.current}`);
+    
+    // Double-check DataChannel state before sending
+    if (!dcRef.current || dcRef.current.readyState !== "open") {
+      console.log("❌ DataChannel not ready for feedback request");
+      alert("Connection lost! Please refresh the page to get coach feedback.");
+      return;
+    }
+    
+    console.log("🔍 DataChannel state confirmed - proceeding with feedback request");
+    
+        // Send voice feedback request to AI
+        try {
+        const feedbackPrompt = `🎯 ENGLISH COACH FEEDBACK MODE ACTIVATED! 
+        
+        You are Kez's English teacher providing personalized language learning feedback. Kez just described the word "${currentWord.word}" and wants to improve her English.
+        
+        📚 STUDENT'S DESCRIPTION:
+        "${userDescriptionForFeedback || "No description recorded yet"}"
+        
+        🎯 TARGET WORD: ${currentWord.word}
+        🚫 FORBIDDEN WORDS: ${currentWord.forbidden.join(", ")}
+        
+        IMPORTANT FORMATTING: Please structure your feedback with clear sections and line breaks. Use this exact format:
+        
+        1. 🎉 ENCOURAGEMENT: 
+        [Praise what she did well in her description]
+        
+        2. ✏️ GRAMMAR & STRUCTURE: 
+        [Point out any grammar mistakes, incorrect verb tenses, or sentence structure issues with specific corrections]
+        
+        3. 📖 VOCABULARY: 
+        [Suggest better word choices or more natural expressions she could have used]
+        
+        4. 🗣️ FLUENCY: 
+        [Comment on sentence flow and natural English expression]
+        
+        5. 💡 BETTER DESCRIPTION: 
+        [Show how YOU would describe the target word WITHOUT using any forbidden words OR the target word itself]
+        
+        Remember: Be specific and focus on Kez's actual mistakes. No generic advice!`;
+
+      // Send system message first
+      dcRef.current.send(JSON.stringify({
+        type: "conversation.item.create",
+        item: {
+          type: "message",
+          role: "system",
+          content: [{
+            type: "input_text",
+            text: feedbackPrompt
+          }]
+        }
+      }));
+      
+      console.log("✅ System message sent - requesting AI response");
+      
+          // Wait a moment, then request AI response
+          setTimeout(() => {
+            if (dcRef.current && dcRef.current.readyState === "open") {
+              try {
+                dcRef.current.send(JSON.stringify({
+                  type: "response.create"
+                }));
+                console.log("🎤 AI Coach feedback response requested!");
+              } catch (error) {
+                console.error("❌ Error sending response.create:", error);
+                alert("Connection error during feedback request. Please try again.");
+              }
+            } else {
+              console.log("❌ DataChannel closed before response request");
+              alert("Connection lost! Please refresh the page to get coach feedback.");
+            }
+          }, 500); // Increased delay to prevent connection overload
+      
+    } catch (error) {
+      console.error("❌ Error sending feedback request:", error);
+      alert("Failed to send feedback request. Please try again.");
+    }
+  };
+
+  // NEW: Move to next word manually (after feedback)
+  // Feedback Storage Function
+  const storeFeedbackSessionData = (coachFeedback: string) => {
+    if (!currentWord || !feedbackSessionStart) return;
+    
+    const sessionEnd = new Date();
+    const sessionDuration = Math.round((sessionEnd.getTime() - feedbackSessionStart.getTime()) / 1000);
+    
+    // Parse feedback to extract mistake categories (simple keyword-based analysis)
+    const mistakeCategories = {
+      grammar: extractMistakes(coachFeedback, ['grammar', 'verb', 'tense', 'subject', 'agreement', 'sentence structure']),
+      vocabulary: extractMistakes(coachFeedback, ['vocabulary', 'word choice', 'expression', 'phrase', 'better word']),
+      fluency: extractMistakes(coachFeedback, ['fluency', 'flow', 'natural', 'smooth', 'awkward', 'choppy']),
+      structure: extractMistakes(coachFeedback, ['structure', 'organization', 'order', 'arrangement', 'layout'])
+    };
+    
+    const improvements = extractImprovements(coachFeedback);
+    
+    const feedbackSession: FeedbackSession = {
+      id: `session-${Date.now()}`,
+      timestamp: feedbackSessionStart,
+      targetWord: currentWord.word,
+      forbiddenWords: currentWord.forbidden,
+      userDescription: userDescriptionForFeedback,
+      coachFeedback: coachFeedback,
+      sessionDuration: sessionDuration,
+      mistakeCategories: mistakeCategories,
+      improvements: improvements,
+      difficultyLevel: currentWord.forbidden.length > 4 ? 'hard' : currentWord.forbidden.length > 2 ? 'medium' : 'easy'
+    };
+    
+    // Store the session
+    storeFeedbackSession(feedbackSession);
+    
+    // Generate updated weekly analysis
+    const weeklyAnalysis = generateWeeklyAnalysis();
+    
+    console.log(`📊 FEEDBACK SESSION STORED: ${currentWord.word} (${sessionDuration}s)`);
+    console.log(`📈 Weekly Progress: ${weeklyAnalysis.progressScore}/100`);
+    
+    // Reset session timing
+    setFeedbackSessionStart(null);
+  };
+
+  // Helper function to extract mistake categories from feedback
+  const extractMistakes = (feedback: string, keywords: string[]): string[] => {
+    const mistakes: string[] = [];
+    const feedbackLower = feedback.toLowerCase();
+    
+    keywords.forEach(keyword => {
+      if (feedbackLower.includes(keyword)) {
+        // Find context around the keyword
+        const keywordIndex = feedbackLower.indexOf(keyword);
+        const start = Math.max(0, keywordIndex - 30);
+        const end = Math.min(feedback.length, keywordIndex + 50);
+        const context = feedback.substring(start, end).trim();
+        mistakes.push(context);
+      }
+    });
+    
+    return mistakes;
+  };
+
+  // Helper function to extract improvements from feedback
+  const extractImprovements = (feedback: string): string[] => {
+    const improvements: string[] = [];
+    const improvementMarkers = ['try', 'instead', 'better', 'improve', 'suggestion', 'tip'];
+    
+    improvementMarkers.forEach(marker => {
+      const regex = new RegExp(`${marker}[^.!?]*[.!?]`, 'gi');
+      const matches = feedback.match(regex);
+      if (matches) {
+        improvements.push(...matches.map(match => match.trim()));
+      }
+    });
+    
+    return improvements;
+  };
+
+  const handleMoveToNextWord = () => {
+    console.log("⏭️ Manual move to next word requested");
+    setIsInFeedbackMode(false); // Exit feedback mode
+    isInFeedbackModeRef.current = false; // Immediate ref update
+    setFeedbackSessionStart(null); // Reset session timing
+    
+    // Inform AI that we're resuming normal taboo game
+    if (dcRef.current && dcRef.current.readyState === "open") {
+      dcRef.current.send(JSON.stringify({
+        type: "conversation.item.create",
+        item: {
+          type: "message",
+          role: "system",
+          content: [{
+            type: "input_text",
+            text: `🎮 FEEDBACK SESSION ENDED - MOVING TO NEW WORD! 
+
+The feedback session is complete and we are moving to a fresh new word now. 
+No forbidden words were used - this is just a normal progression to the next word.
+
+You are the GUESSER again. Wait for Kez to describe the NEW word and try to guess it. Ready for the next challenge!`
+          }]
+        }
+      }));
+      console.log("🎮 Informed AI: Back to taboo mode");
+      
+      // Wait a moment for the system message to be processed before progressing
+      setTimeout(() => {
+        progressToNextWord();
+      }, 1000);
+    } else {
+      // If DataChannel is closed, just progress normally
+      progressToNextWord();
+    }
   };
 
   const getNewTabooWord = () => {
@@ -419,8 +752,8 @@ export default function RealtimeClient() {
       setUsedWords(prev => [...prev, randomWord.word]);
     }
     
-    // Yeni kelime başladığında tüm forbidden words aktif
-    initializeForbiddenWords();
+    // Don't call initializeForbiddenWords() here - let useEffect handle it
+    // This prevents state race conditions
   };
 
   const initializeForbiddenWords = () => {
@@ -430,17 +763,52 @@ export default function RealtimeClient() {
         initialStatus[word] = 'active';
       });
       setForbiddenWordStatus(initialStatus);
+      setCurrentWordGuessed(false); // Reset for new word
+      setUserDescriptionForFeedback(""); // Clear previous descriptions
+      setFeedbackSessionStart(null); // Reset session timing
+      
+      // Note: Conversation clearing moved to manual word progression only
+      // setConversation([]) moved to specific user actions like skip/nextWord
+      console.log("🎮 Forbidden words initialized - conversation preserved - DEBUG");
+      
       setGameRoundActive(true);
       console.log("🎮 New Taboo round started - all forbidden words active:", currentWord.forbidden);
+      
+      // Inform AI about the new word and round
+      if (dcRef.current && dcRef.current.readyState === "open") {
+        dcRef.current.send(JSON.stringify({
+          type: "conversation.item.create",
+          item: {
+            type: "message",
+            role: "system",
+            content: [{
+              type: "input_text",
+              text: `🎯 NEW TABOO ROUND! 
+
+TARGET WORD: ${currentWord.word}
+FORBIDDEN WORDS: ${currentWord.forbidden.join(", ")}
+
+You are the GUESSER. Kez will now describe this word and you need to guess it. Listen carefully to her description and make your best guesses!`
+            }]
+          }
+        }));
+        console.log(`📢 Informed AI: New round started with word "${currentWord.word}"`);
+      }
     }
   };
 
   const nextTabooWord = () => {
+    console.log("✅ User marked word as correct - clearing conversation for fresh start");
+    setConversation([]);
+    messageSequenceRef.current = 0;
     setTabooScore(prev => prev + 1);
     getNewTabooWord();
   };
 
   const skipTabooWord = () => {
+    console.log("⏭️ User manually skipped word - clearing conversation for fresh start");
+    setConversation([]);
+    messageSequenceRef.current = 0;
     getNewTabooWord();
   };
 
@@ -487,6 +855,8 @@ export default function RealtimeClient() {
     const word = targetWord.toLowerCase();
     const lowerText = text.toLowerCase();
     
+    console.log(`🔍 WORD DETECTION DEBUG: Looking for "${word}" in "${lowerText}"`);
+    
     const patterns = [
       // 1. Exact match
       new RegExp(`\\b${word}\\b`),
@@ -506,7 +876,16 @@ export default function RealtimeClient() {
       new RegExp(`\\bthe ${word}\\b`)
     ];
     
-    return patterns.some(pattern => pattern.test(lowerText));
+    const matchFound = patterns.some(pattern => {
+      const matches = pattern.test(lowerText);
+      if (matches) {
+        console.log(`🎯 PATTERN MATCH: "${pattern}" found "${word}" in text`);
+      }
+      return matches;
+    });
+    
+    console.log(`🔍 WORD DETECTION RESULT: ${matchFound ? "FOUND" : "NOT FOUND"}`);
+    return matchFound;
   };
 
   const isActualGuess = (aiText: string, targetWord: string): boolean => {
@@ -517,7 +896,18 @@ export default function RealtimeClient() {
       'would it be', 'is that', 'that would be',
       // ADD: More natural answer patterns
       'store it in a', 'put it in a', 'keep it in a', 'place it in a',
-      'you might store', 'you store', 'you keep', 'you put'
+      'you might store', 'you store', 'you keep', 'you put',
+      // ADD: Direct guess patterns
+      'the word is', 'it\'s a', 'that\'s a', 'this is a',
+      'answer is', 'it must be', 'has to be', 'definitely a',
+      // ADD: Question patterns (enhanced)
+      'are you describing', 'are we talking about', 'do you mean',
+      'are you talking about', 'talking about', 'you talking about',
+      // ADD: Word description patterns  
+      'word you\'re describing', 'you\'re describing', 'describing is',
+      'word you are describing', 'you are describing',
+      // ADD: Common ending patterns for guesses
+      'right?', 'correct?', 'is that it?', 'that it?'
     ];
     
     const text = aiText.toLowerCase();
@@ -591,12 +981,22 @@ export default function RealtimeClient() {
   const progressToNextWord = () => {
     log.game("➡️ User chose to progress to next word");
     
+    // Clear conversation for fresh start with new word
+    console.log("⏭️ Progressing to next word - clearing conversation for fresh start");
+    setConversation([]);
+    messageSequenceRef.current = 0;
+    
     // Clear timer and hide popup
     if (progressionTimer) {
       clearTimeout(progressionTimer);
       setProgressionTimer(null);
     }
     setShowWordProgression(false);
+    setIsInFeedbackMode(false); // Always exit feedback mode when progressing
+    isInFeedbackModeRef.current = false; // Immediate ref update
+    setCurrentWordGuessed(false); // Reset for new word
+    setUserDescriptionForFeedback(""); // Clear previous descriptions
+    setFeedbackSessionStart(null); // Reset session timing
     
     // Notify AI about forbidden word usage ONLY when progressing
     if (dcRef.current?.readyState === "open") {
@@ -606,7 +1006,7 @@ export default function RealtimeClient() {
           type: "message",
           role: "system",
           content: [{
-            type: "text",
+            type: "input_text",
             text: `Kez used a forbidden word. Please acknowledge this briefly and announce we're moving to a new word. Be encouraging!`
           }]
         }
@@ -639,6 +1039,13 @@ export default function RealtimeClient() {
     // Progress after AI speaks - SINGLE EXECUTION ONLY
     setTimeout(() => {
       console.log(`🎮 EXECUTING: Single word progression - DEBUG`);
+      
+      // Clear any stale forbidden word state before getting new word
+      console.log("🧹 Clearing stale forbidden word state before getting new word");
+      setForbiddenWordStatus({});
+      forbiddenWordStatusRef.current = {};
+      currentWordRef.current = null;
+      
       getNewTabooWord();
       setGameRoundActive(true);
       console.log(`🎮 GAME RESUMED - New word started - DEBUG`);
@@ -648,10 +1055,19 @@ export default function RealtimeClient() {
   // Safe Response Creation: Check if response is active before cancelling
   const lastResponseTimeRef = useRef(0);
   const createSafeResponse = (instructions: string, delay: number = 100) => {
-    // GAME PAUSE CHECK: Don't create responses when game is paused
-    if (!gameRoundActive && buzzerPopup.show) {
+    // DEBUG: Log all states for feedback troubleshooting (using ref for immediate access)
+    const currentFeedbackMode = isInFeedbackModeRef.current;
+    console.log(`🔍 createSafeResponse DEBUG - gameRoundActive: ${gameRoundActive}, buzzerPopup.show: ${buzzerPopup.show}, isInFeedbackMode: ${isInFeedbackMode}, isInFeedbackModeRef: ${currentFeedbackMode}`);
+    
+    // GAME PAUSE CHECK: Don't create responses when game is paused, EXCEPT in feedback mode
+    if (!currentFeedbackMode && !gameRoundActive && buzzerPopup.show) {
       console.log("🚫 BLOCKED: Game paused, buzzer popup active - no AI response - DEBUG");
       return;
+    }
+    
+    // FORCE ALLOW: If feedback mode is active, always allow AI responses regardless of other states
+    if (currentFeedbackMode) {
+      console.log("🟢 FEEDBACK MODE OVERRIDE: AI response forced to proceed - DEBUG");
     }
     
     // RATE LIMITING: Prevent rapid successive calls
@@ -707,19 +1123,39 @@ export default function RealtimeClient() {
   };
 
   const handleCorrectGuess = (guessedWord: string, confidence?: number) => {
-    // Prevent duplicate calls - check if we're already processing this word
-    if (!currentWord || gameRoundActive === false) {
-      log.warn("Ignoring duplicate guess or round not active");
+    // Use REF for immediate access to current word (not stale React state)
+    const currentWordRef_current = currentWordRef.current;
+    
+    // Prevent duplicate calls - check if we're already processing this word or word already guessed
+    if (!currentWordRef_current || gameRoundActive === false || currentWordGuessed) {
+      log.warn("Ignoring duplicate guess - round not active or word already guessed");
       return;
     }
     
-    log.game(`Correct guess processed: "${guessedWord}" for word "${currentWord.word}"`);
+    log.game(`Correct guess processed: "${guessedWord}" for word "${currentWordRef_current.word}"`);
     
-    // Skor artır
-    setTabooScore(prev => prev + 1);
+    // 1. IMMEDIATELY STOP AI SPEAKING & CLEAR CURRENT MESSAGE
+    if (dcRef.current && dcRef.current.readyState === "open") {
+      dcRef.current.send(JSON.stringify({
+        type: "response.cancel"
+      }));
+      console.log("⏹️ CANCELLED ACTIVE AI RESPONSE - Correct guess detected");
+    }
     
-    // Round'u pause et to prevent further processing
+    // 2. CLEAR ANY CURRENT AI MESSAGE
+    setCurrentAssistantMessage("");
+    console.log("🗑️ CLEARED AI MESSAGE - Green buzzer activated");
+    
+    // 2. PAUSE GAME - Prevent AI from responding during popup  
     setGameRoundActive(false);
+    console.log(`🎉 GAME PAUSED - Correct guess "${guessedWord}" detected - DEBUG`);
+    
+    // 3. CLEAR ANY CURRENT AI MESSAGE
+    setCurrentAssistantMessage("");
+    
+    // 4. Mark word as guessed and increase score
+    setCurrentWordGuessed(true);
+    setTabooScore(prev => prev + 1);
     
     // AI'a başarı mesajı gönder (tek sefer)
     if (dcRef.current?.readyState === "open") {
@@ -730,25 +1166,25 @@ export default function RealtimeClient() {
           role: "user",
           content: [{ 
             type: "input_text", 
-            text: `YES! Correct! The word was "${currentWord?.word}". Great job!` 
+            text: `YES! Correct! The word was "${currentWordRef_current.word}". Great job!` 
           }]
         }
       }));
 
       // AI celebration
-      createSafeResponse(`🎉 Excellent, Kez! That was "${currentWord?.word}"! Amazing description!`);
+      createSafeResponse(`🎉 Excellent, Kez! That was "${currentWordRef_current.word}"! Amazing description!`);
     }
     
     // Show GREEN buzzer popup for correct guess - NO TIMER!
     setBuzzerPopup({
       show: true,
-      word: currentWord.word,
-      message: `🎉 EXCELLENT! You got "${currentWord.word}" correct!`,
+      word: currentWordRef_current.word,
+      message: `🎉 EXCELLENT! You got "${currentWordRef_current.word}" correct!`,
       showChoices: true,
       type: 'correct'
     });
     
-    console.log(`🎉 CORRECT GUESS: "${currentWord.word}" - Waiting for user choice - DEBUG`);
+    console.log(`🎉 CORRECT GUESS: "${currentWordRef_current.word}" - Waiting for user choice - DEBUG`);
   };
 
   const sendFunctionResponse = (callId: string, response: any) => {
@@ -774,49 +1210,32 @@ export default function RealtimeClient() {
     }
   }, [gameMode]);
 
-  // Yeni kelime seçildiğinde forbidden words'ü initialize et
+  // Yeni kelime seçildiğinde forbidden words'ü initialize et - SADECE yeni kelimede
+  const previousWordRef = useRef<string | null>(null);
   useEffect(() => {
     if (currentWord && gameMode === "taboo") {
-      initializeForbiddenWords();
+      // Only initialize if this is actually a NEW word, not the same word
+      if (previousWordRef.current !== currentWord.word) {
+        console.log(`🔄 NEW WORD DETECTED: "${previousWordRef.current}" → "${currentWord.word}" - initializing forbidden words`);
+        initializeForbiddenWords();
+        previousWordRef.current = currentWord.word;
+      } else {
+        console.log(`🔄 SAME WORD: "${currentWord.word}" - preserving forbidden word status`);
+      }
     }
   }, [currentWord]);
 
   // Dynamic prompt generation for Taboo mode
   const getCurrentPrompt = (mode: GameMode) => {
     if (mode === "taboo") {
-      return `🚫 You are Kez's enthusiastic Taboo game partner and English coach!
+      return `🚫 You are the GUESSER in this Taboo game with Kez!
 
-CRITICAL RULES - READ CAREFULLY:
-- You are the GUESSER, NOT the word provider
-- Kez has her own word card that you CANNOT see
-- NEVER give Kez a word to describe
-- NEVER say "describe this word" or "your word is..."
-- Wait for Kez to start describing something to you
+RULES:
+- Kez describes a word, you guess it
+- Be brief: "Is it [guess]?" or "Could it be [word]?"
+- Keep greetings short: Just say "Ready!" or "Let's play!"
 
-YOUR ROLE:
-1. Greet Kez warmly and wait for her to describe something
-2. Listen to her descriptions and try to guess what she's talking about
-3. Make genuine guesses: "Is it a [your guess]?" or "Are you thinking of [guess]?"
-4. You don't know what the target word is - figure it out from her clues!
-
-WHEN KEZ DESCRIBES SOMETHING:
-- Listen carefully and try to guess: "Hmm Kez, based on your description... is it [guess]?"
-- Encourage her: "Great description so far, Kez! Tell me more!"
-- Build suspense: "Interesting... I'm thinking... could it be...?"
-- If you're unsure: "Can you give me another clue, Kez?"
-
-ENGAGEMENT FOR KEZ:
-- HIGH ENERGY responses: "Come on Kez, you've got this!", "Amazing clues!"
-- Celebrate her creativity: "Kez, what a clever way to describe that!"
-- Motivational boosts: "You're getting so good at this game!"
-- Make her feel successful: "You're making this look easy!"
-
-TEACHING WHILE PLAYING:
-- Gently correct major mistakes while staying in the game
-- Vocabulary building: "Perfect word choice, Kez!"
-- Encourage attempts: "Great effort, Kez!"
-
-REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
+Wait for Kez to describe something, then guess! 🎲`;
     }
     return GAME_MODE_PROMPTS[mode];
   };
@@ -825,7 +1244,7 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
     if (dcRef.current && dcRef.current.readyState === "open") {
       const threshold = useOptimalThreshold && speechAnalytics.totalSpeechEvents >= 3 
         ? speechAnalytics.optimalThreshold 
-        : 0.8;
+        : 0.9; // Increased from 0.8 to 0.9 for better noise filtering
       
       console.log("🎛️ Updating session with VAD settings:", {
         threshold,
@@ -841,7 +1260,7 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
           turn_detection: {
             type: "server_vad",
             threshold: threshold, // Optimal threshold veya default
-            prefix_padding_ms: 500, // Daha uzun bekleme
+            prefix_padding_ms: 800, // Increased from 500ms to 800ms for better noise filtering
             silence_duration_ms: currentSilenceDuration || silenceDuration // Kullanıcı ayarı
           },
           temperature: currentPace === "slow" ? 0.6 : currentPace === "fast" ? 1.0 : 0.8,
@@ -949,7 +1368,7 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
               
               // Safe initial greeting response
               setTimeout(() => {
-                createSafeResponse(`Hello Kez! Ready for an exciting ${gameMode} session? Let's have some fun!`);
+                createSafeResponse(`Let's start!`);
               }, 200); // Small delay to ensure setup is complete
               
               // Temizle
@@ -1015,21 +1434,8 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
     const currentSeq = messageSequenceRef.current;
     messageSequenceRef.current += 1;
     
-    const aiMessage = {
-      id: `ai-${aiTimestamp.getTime()}`,
-      role: "assistant" as const,
-      content: "🤖 Thinking...",
-      timestamp: aiTimestamp,
-      isComplete: false,
-      sequence: currentSeq
-    };
-    
-    // Add to conversation immediately (console-like behavior)
-    setConversation(prev => [...prev, aiMessage]);
-    console.log(`✅ AI MESSAGE ADDED IMMEDIATELY - Sequence: ${currentSeq} - DEBUG`);
-    
-    // Store reference for content update
-    aiMessage.id = `ai-${currentSeq}`; // Use sequence for consistent ID
+    // NOTE: No more "🤖 Thinking..." bubbles - we'll add AI message only when we have content
+    console.log(`✅ AI RESPONSE STARTED - Sequence: ${currentSeq} - DEBUG`);
     
     log.debug("🔄 Detection flag reset edildi - User message cleared");
   }
@@ -1064,7 +1470,9 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
             
             if (transcript) {
               // REAL-TIME UI: Use same logic as console - add message directly
-              const userTimestamp = new Date();
+              // Use sequence-based timestamp to ensure correct chronological order
+              const baseTime = Date.now();
+              const userTimestamp = new Date(baseTime + messageSequenceRef.current * 1000); // Add seconds based on sequence
               const currentSeq = messageSequenceRef.current;
               messageSequenceRef.current += 1;
               
@@ -1077,9 +1485,20 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
                 sequence: currentSeq
               };
               
+              // Accumulate user descriptions for feedback
+              if (currentWord && gameRoundActive) {
+                setUserDescriptionForFeedback(prev => {
+                  const newDescription = prev ? `${prev} ${transcript}` : transcript;
+                  console.log(`📝 ACCUMULATED USER DESCRIPTION: "${newDescription}" - DEBUG`);
+                  return newDescription;
+                });
+              }
+              
               // Add to conversation immediately (same as console logic)
               setConversation(prev => [...prev, userMessage]);
               console.log(`✅ USER MESSAGE ADDED DIRECTLY: "${transcript}" [${userTimestamp.toLocaleTimeString()}] - Sequence: ${currentSeq} - DEBUG`);
+              console.log(`🔍 CONVERSATION ORDER DEBUG - Total messages: ${conversation.length + 1}, Latest sequence: ${currentSeq}`);
+              console.log(`⏰ TIMESTAMP DEBUG - User: ${userTimestamp.getTime()}, Formatted: ${userTimestamp.toLocaleTimeString()}`);
               
               // Taboo forbidden word kontrolü - Kez'in konuşması
               checkForbiddenWords(transcript, 'user');
@@ -1166,17 +1585,31 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
                 return; // Skip processing
               }
               
-              // REAL-TIME UI: Update existing AI message with content
-              const currentSeq = messageSequenceRef.current - 1; // Last added AI message
+              // REAL-TIME UI: Add AI message with actual content (no placeholder)
+              // Use sequence-based timestamp to ensure correct chronological order
+              const baseTime = Date.now();
+              const aiTimestamp = new Date(baseTime + messageSequenceRef.current * 1000); // Add seconds based on sequence
+              const currentSeq = messageSequenceRef.current;
+              messageSequenceRef.current += 1;
               
-              setConversation(prev => prev.map(msg => 
-                msg.role === "assistant" && !msg.isComplete && msg.sequence === currentSeq
-                  ? { ...msg, content: aiMessageContent, isComplete: true }
-                  : msg
-              ));
+              const finalAiMessage = {
+                id: `ai-${currentSeq}`,
+                role: "assistant" as const,
+                content: aiMessageContent,
+                timestamp: aiTimestamp,
+                isComplete: true,
+                sequence: currentSeq
+              };
               
-              const timeStr = new Date().toLocaleTimeString();
-              console.log(`✅ AI MESSAGE UPDATED: "${aiMessageContent}" [${timeStr}] - Sequence: ${currentSeq} - DEBUG`);
+              setConversation(prev => [...prev, finalAiMessage]);
+              console.log(`✅ AI MESSAGE ADDED: "${aiMessageContent}" [${aiTimestamp.toLocaleTimeString()}] - Sequence: ${currentSeq} - DEBUG`);
+              console.log(`🔍 CONVERSATION ORDER DEBUG - Total messages: ${conversation.length + 1}, Latest sequence: ${currentSeq}`);
+              console.log(`⏰ TIMESTAMP DEBUG - AI: ${aiTimestamp.getTime()}, Formatted: ${aiTimestamp.toLocaleTimeString()}`);
+              
+              // Check if this is coach feedback and store the session
+              if (isInFeedbackModeRef.current && feedbackSessionStart && currentWord) {
+                storeFeedbackSessionData(aiMessageContent);
+              }
 
               // Timeline fix: Buffer game logic for when user transcript arrives
               if (gameMode === "taboo" && currentWord) {
@@ -1186,10 +1619,40 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
                   checkForbiddenWords(aiMessageContent, 'ai');
                   
                   // Enhanced backup guess detection (fallback mechanism)
-                  const targetWord = currentWord.word;
+                  // Use REF for immediate access to current word (not stale React state)
+                  const currentWordRef_current = currentWordRef.current;
+                  if (!currentWordRef_current) {
+                    console.log("🚫 GUESS DETECTION SKIPPED: No current word available - DEBUG");
+                    return;
+                  }
+                  
+                  const targetWord = currentWordRef_current.word;
                   
                   // Use smart context-aware detection
                   const foundGuess = isActualGuess(aiMessageContent, targetWord);
+                  
+                  console.log(`🔍 GUESS DETECTION DEBUG for "${targetWord}":`, {
+                    aiMessage: aiMessageContent.substring(0, 100),
+                    foundGuess,
+                    gameRoundActive,
+                    functionCallDetected,
+                    currentWordGuessed,
+                    isInFeedbackMode: isInFeedbackModeRef.current,
+                    currentWordObject: currentWordRef_current,
+                    forbiddenWordStatus: Object.keys(forbiddenWordStatusRef.current || {}),
+                    aiMessageFull: aiMessageContent
+                  });
+                  
+                  // Skip guess detection if word already guessed or in feedback mode
+                  if (currentWordGuessed) {
+                    console.log("🚫 GUESS DETECTION SKIPPED: Word already guessed correctly - DEBUG");
+                    return;
+                  }
+                  
+                  if (isInFeedbackModeRef.current) {
+                    console.log("🎓 FEEDBACK MODE: Guess detection paused - game functions disabled - DEBUG");
+                    return;
+                  }
                   
                   if (foundGuess && gameRoundActive && !functionCallDetected) {
                     console.log(`🎮 BACKUP DETECTION: AI guessed correct word: ${targetWord} - DEBUG`);
@@ -1199,8 +1662,18 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
                     console.log("✅ Backup system processed - DEBUG");
                   } else if (foundGuess && functionCallDetected) {
                     console.log("❌ Backup silenced - main system already ran - DEBUG");
-                  } else if (checkTargetWordVariations(aiMessageContent, targetWord) && !foundGuess) {
-                    console.log(`🔍 Target word "${targetWord}" mentioned but no guess context detected - DEBUG`);
+                  } else if (checkTargetWordVariations(aiMessageContent, targetWord) && gameRoundActive && !functionCallDetected) {
+                    // ULTRA FALLBACK: If target word mentioned but no guess context detected
+                    console.log(`🎯 ULTRA FALLBACK: Target word "${targetWord}" mentioned - treating as guess - DEBUG`);
+                    setFunctionCallDetected(true);
+                    handleCorrectGuess(targetWord, 0.8);
+                    console.log("✅ Ultra fallback processed - DEBUG");
+                  } else if (checkTargetWordVariations(aiMessageContent, targetWord)) {
+                    console.log(`🔍 Target word "${targetWord}" mentioned but conditions not met:`);
+                    console.log(`   - gameRoundActive: ${gameRoundActive}`);
+                    console.log(`   - functionCallDetected: ${functionCallDetected}`);
+                    console.log(`   - currentWordGuessed: ${currentWordGuessed}`);
+                    console.log(`   - isInFeedbackMode: ${isInFeedbackModeRef.current}`);
                   } else {
                     console.log(`🔍 No target word match found in: "${aiMessageContent}" - DEBUG`);
                   }
@@ -1665,182 +2138,327 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
                 <div style={{fontSize: "14px", color: "#666", marginTop: "5px"}}>
                   Choose the AI voice that Kez prefers most
                 </div>
+      </div>
+
+              {/* Progress Dashboard Button */}
+              <div style={{marginBottom: "15px"}}>
+                <button 
+                  onClick={() => setShowProgressDashboard(true)}
+                  style={{
+                    padding: "12px 20px",
+                    fontSize: "16px",
+                    fontWeight: "bold",
+                    backgroundColor: "#2196F3",
+                    color: "white",
+                    border: "none",
+                    borderRadius: "8px",
+                    cursor: "pointer",
+                    transition: "all 0.3s ease",
+                    boxShadow: "0 2px 8px rgba(33, 150, 243, 0.3)",
+                    width: "100%"
+                  }}
+                  onMouseOver={(e) => {
+                    e.currentTarget.style.backgroundColor = "#1976D2";
+                    e.currentTarget.style.transform = "translateY(-1px)";
+                  }}
+                  onMouseOut={(e) => {
+                    e.currentTarget.style.backgroundColor = "#2196F3";
+                    e.currentTarget.style.transform = "translateY(0)";
+                  }}
+                >
+                  📊 Progress Dashboard (Beta)
+                </button>
+                <div style={{fontSize: "14px", color: "#666", marginTop: "5px"}}>
+                  View your learning progress and analytics
+                </div>
               </div>
             </div>
           )}
       </div>
 
-        {/* Taboo Word Card - Only show in Taboo mode */}
+        {/* Taboo Mode: Side-by-Side Layout */}
         {gameMode === "taboo" && currentWord && (
           <div style={{
-            border: `4px solid ${currentMode.color}`,
-            borderRadius: "20px",
-            padding: "25px",
-            marginBottom: "25px",
-            background: `linear-gradient(135deg, ${currentMode.color} 0%, ${currentMode.color}90 100%)`,
-            color: "white",
-            textAlign: "center",
-            boxShadow: "0 8px 25px rgba(0,0,0,0.15)"
+            display: "flex",
+            gap: "20px",
+            marginBottom: "25px"
           }}>
+            {/* Word Card - 1/3 width (simplified) */}
             <div style={{
+              flex: "1",
+              border: `4px solid ${currentMode.color}`,
+              borderRadius: "20px",
+              padding: "20px",
+              background: `linear-gradient(135deg, ${currentMode.color} 0%, ${currentMode.color}90 100%)`,
+              color: "white",
+              textAlign: "center",
+              boxShadow: "0 8px 25px rgba(0,0,0,0.15)",
               display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-              marginBottom: "20px"
+              flexDirection: "column",
+              minHeight: "500px" // Ensure consistent height
             }}>
               <div style={{
-                background: "rgba(255,255,255,0.2)",
-                padding: "8px 15px",
-                borderRadius: "20px",
-                fontSize: "14px",
-                fontWeight: "bold"
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                marginBottom: "20px"
               }}>
-                Score: {tabooScore}
+                <div style={{
+                  background: "rgba(255,255,255,0.2)",
+                  padding: "8px 15px",
+                  borderRadius: "20px",
+                  fontSize: "14px",
+                  fontWeight: "bold"
+                }}>
+                  Score: {tabooScore}
+                </div>
+                <div style={{
+                  background: "rgba(255,255,255,0.2)",
+                  padding: "8px 15px",
+                  borderRadius: "20px",
+                  fontSize: "14px",
+                  fontWeight: "bold"
+                }}>
+                  Word {usedWords.length}/{TABOO_WORDS.length}
+                </div>
               </div>
-              <div style={{
-                background: "rgba(255,255,255,0.2)",
-                padding: "8px 15px",
-                borderRadius: "20px",
-                fontSize: "14px",
-                fontWeight: "bold"
-              }}>
-                Word {usedWords.length}/{TABOO_WORDS.length}
-              </div>
-      </div>
 
-            <div style={{
-              fontSize: "48px",
-              fontWeight: "bold",
-              marginBottom: "10px",
-              textShadow: "2px 2px 4px rgba(0,0,0,0.3)"
-            }}>
-              {currentWord.word}
-            </div>
-            
-            {/* Game State & Rules Status */}
-            <div style={{
-              fontSize: "14px",
-              marginBottom: "15px",
-              display: "flex",
-              gap: "10px",
-              justifyContent: "center",
-              flexWrap: "wrap"
-            }}>
-              <div style={{
-                padding: "4px 12px",
-                background: gameRoundActive ? "rgba(76, 175, 80, 0.8)" : "rgba(255, 152, 0, 0.8)",
-                borderRadius: "15px",
-                color: "white",
-                fontWeight: "bold"
+              <h2 style={{ 
+                fontSize: "24px", 
+                margin: "0 0 15px 0", 
+                textShadow: "0 2px 10px rgba(0,0,0,0.3)",
+                letterSpacing: "2px"
               }}>
-                {gameRoundActive ? "🎮 Round Active" : "⏸️ Round Paused"}
-              </div>
+                {currentWord.word}
+              </h2>
               
               <div style={{
-                padding: "4px 12px",
-                background: "rgba(33, 150, 243, 0.8)",
-                borderRadius: "15px",
-                color: "white",
-                fontWeight: "bold"
+                display: "flex",
+                flexDirection: "column",
+                gap: "8px",
+                alignItems: "center",
+                marginBottom: "25px",
+                flex: "1",
+                width: "100%",
+                padding: "0 10px",
+                minHeight: "0" // Allow shrinking
               }}>
-                🚫 {currentWord.forbidden.filter(w => forbiddenWordStatus[w] !== 'unlocked').length} Active
+                {currentWord.forbidden.map((word, index) => {
+                  const status = forbiddenWordStatus[word] || 'active';
+                  const isUnlocked = status === 'unlocked';
+                  return (
+                    <div
+                      key={index}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "6px",
+                        padding: "6px 12px",
+                        backgroundColor: isUnlocked 
+                          ? "rgba(76, 175, 80, 0.9)" 
+                          : "rgba(255, 255, 255, 0.25)",
+                        borderRadius: "10px",
+                        fontSize: "13px",
+                        fontWeight: "bold",
+                        color: isUnlocked ? "#2E7D32" : "white",
+                        textDecoration: isUnlocked ? 'line-through' : 'none',
+                        transition: "all 0.3s ease",
+                        width: "100%",
+                        maxWidth: "160px",
+                        border: isUnlocked 
+                          ? "2px solid #4CAF50" 
+                          : "2px solid rgba(255, 255, 255, 0.3)",
+                        boxShadow: isUnlocked 
+                          ? "0 1px 4px rgba(76, 175, 80, 0.3)" 
+                          : "0 1px 4px rgba(0, 0, 0, 0.2)"
+                      }}
+                    >
+                      <span style={{ fontSize: "14px" }}>
+                        {isUnlocked ? '🔓' : '🔒'}
+                      </span>
+                      <span style={{ 
+                        flex: 1, 
+                        textAlign: "center",
+                        textTransform: "uppercase",
+                        letterSpacing: "0.5px"
+                      }}>
+                        {word}
+                      </span>
+                    </div>
+                  );
+                })}
               </div>
               
-              <div style={{
-                padding: "4px 12px",
-                background: "rgba(76, 175, 80, 0.8)",
-                borderRadius: "15px",
-                color: "white",
-                fontWeight: "bold"
-              }}>
-                ✅ {currentWord.forbidden.filter(w => forbiddenWordStatus[w] === 'unlocked').length} Unlocked
-              </div>
-            </div>
-
-            <div style={{
-              fontSize: "18px",
-              marginBottom: "20px",
-              opacity: 0.9
-            }}>
-              Describe this word, but don't use these words:
-      </div>
-
-            <div style={{
-              display: "flex",
-              flexWrap: "wrap",
-              gap: "10px",
-              justifyContent: "center",
-              marginBottom: "25px"
-            }}>
-              {currentWord.forbidden.map((word, index) => {
-                const isUnlocked = forbiddenWordStatus[word] === 'unlocked';
-                const isRecentlyUnlocked = recentlyUnlocked.includes(word);
-                return (
-                  <div
-                    key={index}
-                    style={{
-                      background: isUnlocked ? "rgba(76, 175, 80, 0.9)" : "rgba(255,255,255,0.9)",
-                      color: isUnlocked ? "white" : currentMode.color,
-                      padding: "8px 15px",
-                      borderRadius: "25px",
-                      fontSize: "16px",
-                      transform: isRecentlyUnlocked ? "scale(1.1)" : isUnlocked ? "scale(0.95)" : "scale(1)",
-                      animation: isRecentlyUnlocked ? "shake 0.5s ease-in-out 3" : "none",
-                      fontWeight: "bold",
-                      border: isUnlocked ? "2px solid #4CAF50" : "2px solid white",
-                      textDecoration: isUnlocked ? "line-through" : "none",
-                      opacity: isUnlocked ? 0.8 : 1,
-                      transition: "all 0.3s ease"
-                    }}
-                  >
-                    {isUnlocked ? "✅" : "🚫"} {word}
-                  </div>
-                );
-              })}
-      </div>
-
-            <div style={{
-              display: "flex",
-              gap: "15px",
-              justifyContent: "center"
-            }}>
-              <button
-                onClick={nextTabooWord}
-                style={{
-                  background: "rgba(255,255,255,0.9)",
-                  color: currentMode.color,
-                  border: "none",
-                  padding: "12px 25px",
-                  borderRadius: "25px",
-                  fontSize: "16px",
-                  fontWeight: "bold",
-                  cursor: "pointer",
-                  transition: "all 0.3s ease"
-                }}
-              >
-                ✅ Correct! (+1)
-              </button>
+              {/* Skip button with distinctive styling */}
               <button
                 onClick={skipTabooWord}
                 style={{
-                  background: "rgba(255,255,255,0.2)",
+                  background: "linear-gradient(135deg, #FF6B6B 0%, #FF8E53 100%)",
                   color: "white",
-                  border: "2px solid white",
-                  padding: "12px 25px",
-                  borderRadius: "25px",
-                  fontSize: "16px",
+                  border: "none",
+                  borderRadius: "12px",
+                  padding: "12px 24px",
+                  fontSize: "14px",
                   fontWeight: "bold",
                   cursor: "pointer",
-                  transition: "all 0.3s ease"
+                  transition: "all 0.3s ease",
+                  boxShadow: "0 4px 12px rgba(255, 107, 107, 0.4)",
+                  marginTop: "auto" // Push to bottom
+                }}
+                onMouseOver={(e) => {
+                  e.currentTarget.style.background = "linear-gradient(135deg, #FF5252 0%, #FF7043 100%)";
+                  e.currentTarget.style.transform = "translateY(-2px)";
+                  e.currentTarget.style.boxShadow = "0 6px 16px rgba(255, 107, 107, 0.5)";
+                }}
+                onMouseOut={(e) => {
+                  e.currentTarget.style.background = "linear-gradient(135deg, #FF6B6B 0%, #FF8E53 100%)";
+                  e.currentTarget.style.transform = "translateY(0)";
+                  e.currentTarget.style.boxShadow = "0 4px 12px rgba(255, 107, 107, 0.4)";
                 }}
               >
-                ⏭️ Skip
+                ⏭️ Skip Word
               </button>
+            </div>
+            
+            {/* Conversation Area - 2/3 width */}
+            <div style={{
+              flex: "2",
+              display: "flex",
+              flexDirection: "column"
+            }}>
+              <div style={{
+                border: `3px solid ${currentMode.color}`, 
+                borderRadius: "20px", 
+                padding: "20px", 
+                height: "500px", // Fixed height for consistent scrolling
+                overflowY: "auto",
+                overflowX: "hidden",
+                background: `linear-gradient(135deg, ${currentMode.bgColor} 0%, white 100%)`,
+                display: "flex",
+                flexDirection: "column"
+              }}>
+                <div style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  marginBottom: "20px",
+                  flexShrink: 0, // Don't shrink header
+                  paddingBottom: "15px",
+                  borderBottom: "2px solid rgba(255,255,255,0.3)"
+                }}>
+                  <h3 style={{
+                    margin: 0, 
+                    fontSize: "20px", 
+                    color: currentMode.color,
+                    fontWeight: "bold"
+                  }}>
+                    🎮 Taboo Game Conversation
+                  </h3>
+                </div>
+
+                {/* Scrollable messages area */}
+                <div style={{
+                  flex: 1, // Take remaining space
+                  overflowY: "auto",
+                  overflowX: "hidden",
+                  paddingRight: "10px" // Space for scrollbar
+                }}>
+                  {conversation.length === 0 && !currentUserMessage && !currentAssistantMessage && (
+                  <div style={{
+                    textAlign: "center",
+                    padding: "40px",
+                    color: "#666",
+                    fontSize: "18px"
+                  }}>
+                    <div style={{fontSize: "48px", marginBottom: "15px"}}>🎤</div>
+                    Start describing your word!
+                  </div>
+                  )}
+                  
+                  {conversation
+                    .filter(msg => msg.role !== "system") // Hide system messages from UI
+                    .sort((a, b) => b.sequence - a.sequence) // Sort by sequence DESC (newest on top)
+                    .map((msg) => {
+                    // Taboo modunda AI'nin tahminlerini özel göster
+                    const isGuess = gameMode === "taboo" && msg.role === "assistant" && 
+                      (msg.content.toLowerCase().includes("is it") || 
+                       msg.content.toLowerCase().includes("could it be") ||
+                       msg.content.toLowerCase().includes("might it be"));
+    
+                    return (
+                      <div
+                        key={msg.id}
+                        style={{
+                          marginBottom: "15px",
+                          padding: "12px 16px",
+                          borderRadius: "12px",
+                          background: msg.role === "user" 
+                            ? "linear-gradient(135deg, #667eea 0%, #764ba2 100%)"
+                            : isGuess
+                            ? "linear-gradient(135deg, #f093fb 0%, #f5576c 100%)"
+                            : "linear-gradient(135deg, #4facfe 0%, #00f2fe 100%)",
+                          color: "white",
+                          boxShadow: "0 3px 10px rgba(0,0,0,0.15)",
+                          fontSize: "14px",
+                          lineHeight: "1.4"
+                        }}
+                      >
+                        <div style={{ 
+                          fontWeight: "bold", 
+                          marginBottom: "5px",
+                          fontSize: "12px",
+                          opacity: 0.9
+                        }}>
+                          {msg.role === "user" ? "🎤 Kez" : "🤖 AI"} • {msg.timestamp.toLocaleTimeString()}
+                          {isGuess && " • 🎯 GUESS"}
+                        </div>
+                        <div>{msg.content}</div>
+                      </div>
+                    );
+                  })}
+                  
+                  {/* Canlı mesaj gösterimi */}
+                  {currentUserMessage && (
+                    <div style={{
+                      marginBottom: "15px",
+                      padding: "12px 16px",
+                      borderRadius: "12px",
+                      background: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
+                      color: "white",
+                      opacity: 0.8,
+                      fontSize: "14px"
+                    }}>
+                      <div style={{ fontWeight: "bold", marginBottom: "5px", fontSize: "12px" }}>
+                        🎤 Kez • Speaking...
+                      </div>
+                      <div>{currentUserMessage}</div>
+                    </div>
+                  )}
+                  
+                  {currentAssistantMessage && (
+                    <div style={{
+                      marginBottom: "15px",
+                      padding: "12px 16px",
+                      borderRadius: "12px",
+                      background: "linear-gradient(135deg, #4facfe 0%, #00f2fe 100%)",
+                      color: "white",
+                      opacity: 0.8,
+                      fontSize: "14px"
+                    }}>
+                      <div style={{ fontWeight: "bold", marginBottom: "5px", fontSize: "12px" }}>
+                        🤖 AI • Responding...
+                      </div>
+                      <div>{currentAssistantMessage}</div>
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
           </div>
         )}
 
-        {/* Live Conversation Display */}
+        {/* Live Conversation Display - Only for non-taboo modes */}
+        {gameMode !== "taboo" && (
         <div style={{
           border: `3px solid ${currentMode.color}`, 
           borderRadius: "20px", 
@@ -1899,10 +2517,11 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
           )}
           
           {conversation
+            .filter(msg => msg.role !== "system") // Hide system messages from UI
+            .sort((a, b) => b.sequence - a.sequence) // Sort by sequence DESC (newest on top)
             .map((msg) => {
-            // Taboo modunda AI'nin tahminlerini özel göster
-            const isTabooGuess = gameMode === "taboo" && msg.role === "assistant" && 
-              currentWord && msg.content.toLowerCase().includes(currentWord.word.toLowerCase());
+            // This is non-taboo mode conversation display
+            const isTabooGuess = false; // Not applicable in non-taboo modes
             
             // Düzeltmeleri tespit et (🔧 işareti olan mesajlar)
             const isCorrection = msg.role === "assistant" && msg.content.includes("🔧");
@@ -1995,6 +2614,7 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
           <div ref={conversationEndRef} style={{ height: "1px" }} />
           </div> {/* End of scrollable messages area */}
         </div>
+        )}
 
         {/* Token Usage Stats */}
         {showUsageStats && sessionUsage && (
@@ -2137,7 +2757,7 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
                 
                 <div style={{ display: "flex", gap: "15px", justifyContent: "center" }}>
                   <button
-                    onClick={handleBuzzerContinue}
+                    onClick={buzzerPopup.type === 'correct' ? handleGetCoachFeedback : handleBuzzerContinue}
                     style={{
                       background: "rgba(255, 255, 255, 0.2)",
                       color: "white",
@@ -2158,7 +2778,7 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
                       e.currentTarget.style.transform = "scale(1)";
                     }}
                   >
-                    {buzzerPopup.type === 'correct' ? '🔄 Same Word Again' : '🔄 Continue Word'}
+                    {buzzerPopup.type === 'correct' ? '💬 Get Coach Feedback' : '🔄 Continue'}
                   </button>
                   
                   <button
@@ -2275,6 +2895,45 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
           </div>
         )}
 
+        {/* Fixed Move to Next Word Button - Only during feedback mode */}
+        {currentWord && gameRoundActive && isInFeedbackMode && (
+          <div style={{
+            position: 'fixed',
+            bottom: '30px',
+            right: '30px',
+            zIndex: 1000
+          }}>
+            <button
+              onClick={handleMoveToNextWord}
+              style={{
+                background: "linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)",
+                color: "white",
+                border: "none",
+                borderRadius: "25px",
+                padding: "15px 25px",
+                fontSize: "16px",
+                fontWeight: "bold",
+                cursor: "pointer",
+                boxShadow: "0 4px 20px rgba(99, 102, 241, 0.4)",
+                transition: "all 0.3s ease",
+                display: "flex",
+                alignItems: "center",
+                gap: "10px"
+              }}
+              onMouseOver={(e) => {
+                e.currentTarget.style.transform = "scale(1.05)";
+                e.currentTarget.style.boxShadow = "0 6px 25px rgba(99, 102, 241, 0.6)";
+              }}
+              onMouseOut={(e) => {
+                e.currentTarget.style.transform = "scale(1)";
+                e.currentTarget.style.boxShadow = "0 4px 20px rgba(99, 102, 241, 0.4)";
+              }}
+            >
+              ⏭️ Next Word
+            </button>
+          </div>
+        )}
+
         {/* Footer */}
         <div style={{
           textAlign: "center",
@@ -2292,6 +2951,12 @@ REMEMBER: Wait for Kez to describe something - don't give her words! 🎲✨`;
         </div>
       </div>
     </div>
+    
+    {/* Progress Dashboard */}
+    <ProgressDashboard 
+      isVisible={showProgressDashboard}
+      onClose={() => setShowProgressDashboard(false)}
+    />
     </>
   );
 }
