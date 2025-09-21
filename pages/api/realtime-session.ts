@@ -81,13 +81,19 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const isLocal = process.env.NODE_ENV === 'development';
     
     if (isLocal) {
-      // Local development: use Vercel proxy directly (working)
-      const vercelUrl = "https://kez-english-app.vercel.app/api/realtime-session";
-      console.log("🔄 LOCAL DEV: Using Vercel proxy directly");
+      // Local development: use Vercel proxy with cache buster
+      const timestamp = Date.now();
+      const vercelUrl = `https://kez-english-app.vercel.app/api/realtime-session?t=${timestamp}`;
+      console.log("🔄 LOCAL DEV: Using Vercel proxy with cache buster");
       
       const vercelResponse = await fetch(vercelUrl, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { 
+          "Content-Type": "application/json",
+          "Cache-Control": "no-cache, no-store, must-revalidate",
+          "Pragma": "no-cache",
+          "Expires": "0"
+        },
         body: JSON.stringify({ gameMode, voice })
       });
       
