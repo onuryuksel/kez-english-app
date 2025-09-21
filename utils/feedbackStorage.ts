@@ -153,7 +153,7 @@ export const generateWeeklyAnalysis = (): WeeklyAnalysis => {
   const analysis: WeeklyAnalysis = {
     weekStartDate,
     totalSessions: weekSessions.length,
-    wordsAttempted: [...new Set(weekSessions.map(s => s.targetWord))],
+    wordsAttempted: Array.from(new Set(weekSessions.map(s => s.targetWord))),
     commonMistakes: {
       grammar: {},
       vocabulary: {},
@@ -210,7 +210,7 @@ const calculateProgressScore = (sessions: FeedbackSession[]): number => {
   
   // Score based on consistency, variety of words, and session completion
   const consistencyScore = Math.min(sessions.length * 10, 50); // Max 50 for consistency
-  const varietyScore = Math.min([...new Set(sessions.map(s => s.targetWord))].length * 5, 30); // Max 30 for variety
+  const varietyScore = Math.min(Array.from(new Set(sessions.map(s => s.targetWord))).length * 5, 30); // Max 30 for variety
   const completionScore = sessions.filter(s => s.coachFeedback.length > 100).length * 4; // Max 20 for quality
   
   return Math.min(consistencyScore + varietyScore + completionScore, 100);
