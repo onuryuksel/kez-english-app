@@ -126,3 +126,4 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     res.status(500).json({ error: "server_error", detail: e?.message || String(e) });
   }
 }
+// Force Vercel deployment Mon Sep 22 01:39:13 +04 2025
