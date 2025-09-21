@@ -77,77 +77,51 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     console.log("- Game Mode:", gameMode);
     console.log("- Body size:", JSON.stringify(requestBody).length, "bytes");
 
-    // Smart fallback: try direct first, fallback to Vercel proxy if needed
+    // For local development: use working Vercel proxy
     const isLocal = process.env.NODE_ENV === 'development';
-    let openaiUrl = "https://api.openai.com/v1/realtime/sessions";
     
-    console.log(`🔧 Environment: ${isLocal ? 'LOCAL' : 'PRODUCTION'}, API Key available: ${!!apiKey}`);
-    
-    try {
-      // Try direct OpenAI API call first
-      const r = await fetch(openaiUrl, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          "Content-Type": "application/json",
-          "OpenAI-Beta": "realtime=v1"
-        },
-        body: JSON.stringify(requestBody)
-      });
-
-      console.log("🔍 Direct OpenAI API - Response status:", r.status);
-
-      if (r.ok) {
-        const session = await r.json();
-        console.log("✅ Direct OpenAI API success");
-        return res.status(200).json(session);
-      } else {
-        const err = await r.text();
-        console.log("❌ Direct OpenAI API failed:", err);
-        throw new Error(`OpenAI API failed: ${err}`);
-      }
-    } catch (directError) {
-      console.log("🚫 Direct OpenAI API failed, trying Vercel fallback...", directError);
+    if (isLocal) {
+      // Local development: use Vercel proxy directly (working)
+      const vercelUrl = "https://kez-english-app.vercel.app/api/realtime-session";
+      console.log("🔄 LOCAL DEV: Using Vercel proxy directly");
       
-      if (isLocal) {
-        // Fallback to Vercel proxy for local development only
-        try {
-          const vercelUrl = "https://kez-english-app.vercel.app/api/realtime-session";
-          console.log("🔄 Using Vercel proxy fallback");
-          
-          const vercelResponse = await fetch(vercelUrl, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ gameMode, voice })
-          });
-          
-          if (vercelResponse.ok) {
-            const session = await vercelResponse.json();
-            console.log("✅ Vercel proxy fallback success");
-            return res.status(200).json(session);
-          } else {
-            const vercelError = await vercelResponse.text();
-            console.log("❌ Vercel proxy also failed:", vercelError);
-            throw new Error(`Both direct and Vercel proxy failed: ${vercelError}`);
-          }
-        } catch (vercelError) {
-          console.log("🚫 Vercel proxy fallback also failed:", vercelError);
-          return res.status(500).json({ 
-            error: "session_create_failed", 
-            detail: `Both direct API and Vercel proxy failed. Direct: ${directError}. Vercel: ${vercelError}` 
-          });
-        }
-      } else {
-        // Production - only direct API, no fallback
-        return res.status(500).json({ 
-          error: "session_create_failed", 
-          detail: `Direct OpenAI API failed: ${directError}` 
-        });
+      const vercelResponse = await fetch(vercelUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ gameMode, voice })
+      });
+      
+      if (!vercelResponse.ok) {
+        const vercelError = await vercelResponse.text();
+        console.log("❌ Vercel proxy failed:", vercelError);
+        return res.status(500).json({ error: "session_create_failed", detail: vercelError });
       }
+      
+      const session = await vercelResponse.json();
+      console.log("✅ Vercel proxy success");
+      return res.status(200).json(session);
+    }
+    
+    // Production: direct OpenAI API
+    const r = await fetch("https://api.openai.com/v1/realtime/sessions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+        "OpenAI-Beta": "realtime=v1"
+      },
+      body: JSON.stringify(requestBody)
+    });
+
+    if (!r.ok) {
+      const err = await r.text();
+      console.log("❌ OpenAI API Error:", err);
+      return res.status(500).json({ error: "session_create_failed", detail: err });
     }
 
-    // This code should never be reached due to early returns above
-    console.log("⚠️ Unexpected code path reached");
+    const session = await r.json();
+    console.log("✅ Direct OpenAI API success");
+    return res.status(200).json(session);
   } catch (e: any) {
     res.status(500).json({ error: "server_error", detail: e?.message || String(e) });
   }
