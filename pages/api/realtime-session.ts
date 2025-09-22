@@ -6,7 +6,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   try {
     const { gameMode = "casual", voice = "verse" } = req.body;
-    const model = "gpt-4o-mini-realtime-preview-2024-12-17"; // Use the same model as working Vercel
+    const model = "gpt-realtime-2025-08-28"; // Latest realtime model (Aug 2025)
     
     // For local development, manually read the .env.local file if needed
     let apiKey = process.env.OPENAI_API_KEY;

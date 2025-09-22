@@ -1792,7 +1792,7 @@ Wait for Kez to describe something, then guess! 🎲`;
 
       // OpenAI Realtime'a SDP gönder (WebRTC handshake) - proxy üzerinden
       setStatus("sending SDP to OpenAI via proxy…");
-      const model = "gpt-4o-mini-realtime-preview-2024-12-17"; // cheaper realtime tier
+      const model = "gpt-realtime-2025-08-28"; // Latest realtime model (Aug 2025)
       const sdpResp = await fetch("/api/realtime-connect", {
         method: "POST",
         headers: {
