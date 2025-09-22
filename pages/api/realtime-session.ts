@@ -6,15 +6,71 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   try {
     const { gameMode = "casual", voice = "verse" } = req.body;
-    const model = "gpt-4o-mini-realtime-preview-2024-12-17"; // cheaper realtime tier
-    const apiKey = process.env.OPENAI_API_KEY;
+    const model = "gpt-4o-mini-realtime-preview-2024-12-17"; // Use the same model as working Vercel
+    
+    // For local development, manually read the .env.local file if needed
+    let apiKey = process.env.OPENAI_API_KEY;
+    
+    if (process.env.NODE_ENV === 'development' && !apiKey) {
+      try {
+        const fs = require('fs');
+        const envContent = fs.readFileSync('.env.local', 'utf8');
+        const match = envContent.match(/OPENAI_API_KEY=(.+)/);
+        if (match) {
+          apiKey = match[1].trim();
+          console.log("📁 Loaded API key from .env.local file");
+        }
+      } catch (e) {
+        console.log("⚠️ Could not read .env.local:", e.message);
+      }
+    }
+    
+    // For local development, use the working Vercel deployment as proxy
+    if (process.env.NODE_ENV === 'development') {
+      console.log("🔧 LOCAL DEV: Using working Vercel deployment as proxy");
+      console.log("- Bypassing local API key issues");
+      console.log("- Game Mode:", gameMode);
+      console.log("- Voice:", voice);
+      
+      try {
+        // Use your working Vercel deployment URL
+        const vercelResponse = await fetch("https://kez-english-app.vercel.app/api/realtime-session", {
+          method: "POST",
+          headers: { 
+            "Content-Type": "application/json",
+            "User-Agent": "Local-Development-Proxy"
+          },
+          body: JSON.stringify({ gameMode, voice })
+        });
+        
+        if (vercelResponse.ok) {
+          const session = await vercelResponse.json();
+          console.log("✅ Vercel proxy successful!");
+          return res.status(200).json(session);
+        } else {
+          const error = await vercelResponse.text();
+          console.log("❌ Vercel proxy failed:", error);
+          return res.status(500).json({ 
+            error: "vercel_proxy_failed", 
+            detail: `Vercel deployment proxy failed: ${error}` 
+          });
+        }
+      } catch (error) {
+        console.log("❌ Vercel proxy error:", error);
+        return res.status(500).json({ 
+          error: "vercel_proxy_error", 
+          detail: `Cannot connect to Vercel proxy: ${error}` 
+        });
+      }
+    }
+    
+    // Production code (this shouldn't run in development)
     if (!apiKey) {
       return res.status(500).json({ error: "missing_api_key", detail: "OPENAI_API_KEY is not set" });
     }
     
-    // Doğru prompt'u seç
+    // Direct API call for production
     const instructions = GAME_MODE_PROMPTS[gameMode as keyof typeof GAME_MODE_PROMPTS] || GAME_MODE_PROMPTS.casual;
-
     const requestBody = {
       model,
       voice: voice,
@@ -24,15 +80,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         model: "whisper-1",
         language: "en"
       },
-      // Enhanced noise reduction for better background noise filtering - removed due to API compatibility
-      // input_audio_noise_reduction: true,
       turn_detection: { 
         type: "server_vad", 
-        threshold: 0.9, // Higher threshold for better noise filtering
+        threshold: 0.9,
         create_response: true, 
         interrupt_response: true,
-        prefix_padding_ms: 800, // More padding to avoid false triggers
-        silence_duration_ms: 1000 // Longer silence duration
+        prefix_padding_ms: 800,
+        silence_duration_ms: 1000
       },
       output_audio_format: "pcm16",
       tools: gameMode === "taboo" ? [{
@@ -67,48 +121,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       speed: 1.0
     };
 
-    console.log("🔍 Making request to OpenAI with:");
-    console.log("- URL: https://api.openai.com/v1/realtime/sessions");
-    console.log("- API Key length:", apiKey?.length);
-    console.log("- API Key first 20 chars:", apiKey?.substring(0, 20));
-    console.log("- API Key last 10 chars:", apiKey?.substring(-10));
-    console.log("- Model:", model);
-    console.log("- Voice:", voice);
-    console.log("- Game Mode:", gameMode);
-    console.log("- Body size:", JSON.stringify(requestBody).length, "bytes");
-
-    // For local development: use working Vercel proxy
-    const isLocal = process.env.NODE_ENV === 'development';
-    
-    if (isLocal) {
-      // Local development: use Vercel proxy with cache buster
-      const timestamp = Date.now();
-      const vercelUrl = `https://kez-english-app.vercel.app/api/realtime-session?t=${timestamp}`;
-      console.log("🔄 LOCAL DEV: Using Vercel proxy with cache buster");
-      
-      const vercelResponse = await fetch(vercelUrl, {
-        method: "POST",
-        headers: { 
-          "Content-Type": "application/json",
-          "Cache-Control": "no-cache, no-store, must-revalidate",
-          "Pragma": "no-cache",
-          "Expires": "0"
-        },
-        body: JSON.stringify({ gameMode, voice })
-      });
-      
-      if (!vercelResponse.ok) {
-        const vercelError = await vercelResponse.text();
-        console.log("❌ Vercel proxy failed:", vercelError);
-        return res.status(500).json({ error: "session_create_failed", detail: vercelError });
-      }
-      
-      const session = await vercelResponse.json();
-      console.log("✅ Vercel proxy success");
-      return res.status(200).json(session);
-    }
-    
-    // Production: direct OpenAI API
     const r = await fetch("https://api.openai.com/v1/realtime/sessions", {
       method: "POST",
       headers: {

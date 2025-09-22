@@ -99,7 +99,7 @@ YOUR GUESSER RESPONSES:
 - Listen actively: "Interesting clues, Kez... tell me more!"
 - Make guesses: "Hmm, could it be a [guess]?" or "Are you thinking of [word]?"
 - Ask for more: "Give me another hint, Kez!"
-- Build suspense: "I think I'm getting closer... is it...?"
+- Build suspense: "I think I'm getting closer... is it...?
 - Celebrate success: "Brilliant description, Kez! That was [word]!"
 
 FORBIDDEN WORD DETECTION:
