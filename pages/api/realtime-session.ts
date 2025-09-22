@@ -88,7 +88,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         create_response: true, 
         interrupt_response: true,
         prefix_padding_ms: 300,  // Reduced padding for quicker detection
-        silence_duration_ms: 1200,  // Longer silence required to confirm speech end
+        silence_duration_ms: 2000,  // Longer silence for English learners to think and formulate sentences
         idle_timeout_ms: 10000  // NEW: Auto-prompt if user silent for 10 seconds
       },
       output_audio_format: "pcm16",

@@ -192,7 +192,7 @@ export default function RealtimeClient() {
   const [showUsageStats, setShowUsageStats] = useState(false);
   const [isPushToTalk, setIsPushToTalk] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
-  const [silenceDuration, setSilenceDuration] = useState<number>(3500); // Default 3.5 seconds
+  const [silenceDuration, setSilenceDuration] = useState<number>(3000); // Default 3 seconds - balanced thinking time for English learners
   const [selectedVoice, setSelectedVoice] = useState<'alloy' | 'echo' | 'fable' | 'onyx' | 'nova' | 'shimmer' | 'verse' | 'marin' | 'cedar'>('marin'); // Default to marin for best quality
   
   // Voice Activity Tuning - Kullanıcı davranış analizi 🎯
@@ -1357,8 +1357,8 @@ Wait for Kez to describe, ask questions, THEN guess! 🎲`
           turn_detection: {
             type: "server_vad",
             threshold: Math.max(threshold, 0.95), // Minimum 0.95 for background noise filtering
-            prefix_padding_ms: 300, // Reduced for quicker detection
-            silence_duration_ms: currentSilenceDuration || Math.max(silenceDuration, 1200), // Minimum 1200ms
+            prefix_padding_ms: 500, // More padding to catch the start of hesitant speech
+                 silence_duration_ms: currentSilenceDuration || Math.max(silenceDuration, 3000), // Minimum 3000ms for thinking time
             idle_timeout_ms: 10000 // Auto-prompt after 10 seconds of silence
           },
           // temperature removed in GA version - use prompting for tone control
