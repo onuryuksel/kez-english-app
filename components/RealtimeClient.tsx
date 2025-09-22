@@ -1079,14 +1079,15 @@ You are the GUESSER. Kez will now describe this word and you need to guess it. L
     lastResponseTimeRef.current = now;
     
     if (dcRef.current?.readyState === "open") {
-      // Only cancel if there's an active response (to prevent API errors)
-      if (currentAssistantMessage) {
+      // Only cancel if there's an active response and enough time has passed
+      const timeSinceLastResponse = Date.now() - lastResponseTimeRef.current;
+      if (currentAssistantMessage && timeSinceLastResponse > 500) {
         dcRef.current.send(JSON.stringify({
           type: "response.cancel"
         }));
         console.log("🛑 Cancelled active response - DEBUG");
       } else {
-        console.log("🔍 No active response to cancel - DEBUG");
+        console.log("🔍 No active response to cancel or too soon - DEBUG");
       }
       
       // Wait for cancellation, then create new response
@@ -1592,8 +1593,8 @@ Wait for Kez to describe something, then guess! 🎲`;
                 .map(msg => msg.timestamp.getTime())
                 .sort((a, b) => b - a)[0] || 0;
               
-              // Ensure AI timestamp is at least 1 second after last user message
-              const aiTimestamp = new Date(Math.max(now, lastUserTime + 1000));
+              // Ensure AI timestamp is at least 2 seconds after last user message for proper ordering
+              const aiTimestamp = new Date(Math.max(now, lastUserTime + 2000));
               const currentSeq = messageSequenceRef.current;
               messageSequenceRef.current += 1;
               
