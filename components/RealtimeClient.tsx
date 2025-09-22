@@ -2379,6 +2379,45 @@ Wait for Kez to describe something, then guess! 🎲`;
                   </div>
                   )}
                   
+                  {/* Canlı mesaj gösterimi - EN ÜSTTE (newest on top) */}
+                  {currentUserMessage && (
+                    <div style={{
+                      marginBottom: "15px",
+                      padding: "12px 16px",
+                      borderRadius: "12px",
+                      background: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
+                      color: "white",
+                      opacity: 0.9,
+                      fontSize: "14px",
+                      boxShadow: "0 3px 10px rgba(0,0,0,0.2)",
+                      border: "2px solid rgba(255,255,255,0.3)"
+                    }}>
+                      <div style={{ fontWeight: "bold", marginBottom: "5px", fontSize: "12px" }}>
+                        🎤 Kez • Speaking...
+                      </div>
+                      <div>{currentUserMessage}</div>
+                    </div>
+                  )}
+                  
+                  {currentAssistantMessage && (
+                    <div style={{
+                      marginBottom: "15px",
+                      padding: "12px 16px",
+                      borderRadius: "12px",
+                      background: "linear-gradient(135deg, #4facfe 0%, #00f2fe 100%)",
+                      color: "white",
+                      opacity: 0.9,
+                      fontSize: "14px",
+                      boxShadow: "0 3px 10px rgba(0,0,0,0.2)",
+                      border: "2px solid rgba(255,255,255,0.3)"
+                    }}>
+                      <div style={{ fontWeight: "bold", marginBottom: "5px", fontSize: "12px" }}>
+                        🤖 AI • Responding...
+                      </div>
+                      <div>{currentAssistantMessage}</div>
+                    </div>
+                  )}
+                  
                   {conversation
                     .filter(msg => msg.role !== "system") // Hide system messages from UI
                     .sort((a, b) => b.sequence - a.sequence) // Sort by sequence DESC (newest on top)
@@ -2420,41 +2459,6 @@ Wait for Kez to describe something, then guess! 🎲`;
                       </div>
                     );
                   })}
-                  
-                  {/* Canlı mesaj gösterimi */}
-                  {currentUserMessage && (
-                    <div style={{
-                      marginBottom: "15px",
-                      padding: "12px 16px",
-                      borderRadius: "12px",
-                      background: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
-                      color: "white",
-                      opacity: 0.8,
-                      fontSize: "14px"
-                    }}>
-                      <div style={{ fontWeight: "bold", marginBottom: "5px", fontSize: "12px" }}>
-                        🎤 Kez • Speaking...
-                      </div>
-                      <div>{currentUserMessage}</div>
-                    </div>
-                  )}
-                  
-                  {currentAssistantMessage && (
-                    <div style={{
-                      marginBottom: "15px",
-                      padding: "12px 16px",
-                      borderRadius: "12px",
-                      background: "linear-gradient(135deg, #4facfe 0%, #00f2fe 100%)",
-                      color: "white",
-                      opacity: 0.8,
-                      fontSize: "14px"
-                    }}>
-                      <div style={{ fontWeight: "bold", marginBottom: "5px", fontSize: "12px" }}>
-                        🤖 AI • Responding...
-                      </div>
-                      <div>{currentAssistantMessage}</div>
-                    </div>
-                  )}
                 </div>
               </div>
             </div>
