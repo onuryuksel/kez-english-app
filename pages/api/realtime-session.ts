@@ -20,7 +20,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           apiKey = match[1].trim();
           console.log("📁 Loaded API key from .env.local file");
         }
-      } catch (e) {
+      } catch (e: any) {
         console.log("⚠️ Could not read .env.local:", e.message);
       }
     }
