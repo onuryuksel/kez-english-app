@@ -25,8 +25,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       }
     }
     
-    // For local development, use the working Vercel deployment as proxy
-    if (process.env.NODE_ENV === 'development') {
+    // For local development, use direct API if we have a key, otherwise proxy to Vercel
+    if (process.env.NODE_ENV === 'development' && !apiKey) {
       console.log("🔧 LOCAL DEV: Using working Vercel deployment as proxy");
       console.log("- Bypassing local API key issues");
       console.log("- Game Mode:", gameMode);
@@ -118,14 +118,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         }
       }] : [],
       tool_choice: gameMode === "taboo" ? "auto" : "none",
-      speed: 1.0,
-      // Enable cached input for cost optimization (reduces cost by 97% for repeated content)
-      cached_input: true,
-      // Cache prompts and instructions for better cost efficiency
-      cache_control: {
-        instructions: "ephemeral", // Cache instructions across sessions
-        tools: "ephemeral" // Cache tool definitions
-      }
+      speed: 1.0
+      // Note: cached_input and cache_control features are only available with newer API versions
+      // Removed temporarily to maintain compatibility
+      // cached_input: true,
+      // cache_control: {
+      //   instructions: "ephemeral",
+      //   tools: "ephemeral"
+      // }
     };
 
     const r = await fetch("https://api.openai.com/v1/realtime/sessions", {
