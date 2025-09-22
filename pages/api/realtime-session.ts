@@ -1,11 +1,11 @@
 import type { NextApiRequest, NextApiResponse } from "next";
-import { GAME_MODE_PROMPTS } from "../../lib/coachPrompt";
+import { GAME_MODE_PROMPTS, PACE_MODIFIERS } from "../../lib/coachPrompt";
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== "POST") return res.status(405).end();
 
   try {
-    const { gameMode = "casual", voice = "verse" } = req.body;
+    const { gameMode = "casual", voice = "verse", pace = "medium" } = req.body;
     const model = "gpt-realtime-2025-08-28"; // Latest realtime model (Aug 2025)
     
     // For local development, manually read the .env.local file if needed
@@ -25,8 +25,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       }
     }
     
-    // For local development, use direct API if we have a key, otherwise proxy to Vercel
-    if (process.env.NODE_ENV === 'development' && !apiKey) {
+    // For local development, always use Vercel proxy (more reliable)
+    if (process.env.NODE_ENV === 'development') {
       console.log("🔧 LOCAL DEV: Using working Vercel deployment as proxy");
       console.log("- Bypassing local API key issues");
       console.log("- Game Mode:", gameMode);
@@ -69,11 +69,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       return res.status(500).json({ error: "missing_api_key", detail: "OPENAI_API_KEY is not set" });
     }
     
-    // Direct API call for production
-    const instructions = GAME_MODE_PROMPTS[gameMode as keyof typeof GAME_MODE_PROMPTS] || GAME_MODE_PROMPTS.casual;
+    // Direct API call for production with pace-based tone control
+    const baseInstructions = GAME_MODE_PROMPTS[gameMode as keyof typeof GAME_MODE_PROMPTS] || GAME_MODE_PROMPTS.casual;
+    const paceModifier = PACE_MODIFIERS[pace as keyof typeof PACE_MODIFIERS] || PACE_MODIFIERS.medium;
+    const instructions = baseInstructions + paceModifier;
     const requestBody = {
       model,
-      voice: voice,
+      voice: voice || "marin",  // Default to marin for best quality
       modalities: ["audio", "text"],
       instructions: instructions,
       input_audio_transcription: {
@@ -82,11 +84,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       },
       turn_detection: { 
         type: "server_vad", 
-        threshold: 0.9,
+        threshold: 0.95,  // Higher threshold to reduce background noise detection
         create_response: true, 
         interrupt_response: true,
-        prefix_padding_ms: 800,
-        silence_duration_ms: 1000
+        prefix_padding_ms: 300,  // Reduced padding for quicker detection
+        silence_duration_ms: 1200,  // Longer silence required to confirm speech end
+        idle_timeout_ms: 10000  // NEW: Auto-prompt if user silent for 10 seconds
       },
       output_audio_format: "pcm16",
       tools: gameMode === "taboo" ? [{
@@ -119,13 +122,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       }] : [],
       tool_choice: gameMode === "taboo" ? "auto" : "none",
       speed: 1.0
-      // Note: cached_input and cache_control features are only available with newer API versions
+      // Note: temperature parameter removed in GA version
+      // GA models use consistent tone through prompting instead
+      // cached_input and cache_control features are only available with newer API versions
       // Removed temporarily to maintain compatibility
-      // cached_input: true,
-      // cache_control: {
-      //   instructions: "ephemeral",
-      //   tools: "ephemeral"
-      // }
     };
 
     const r = await fetch("https://api.openai.com/v1/realtime/sessions", {

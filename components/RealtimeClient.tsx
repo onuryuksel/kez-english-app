@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { TABOO_WORDS } from "../lib/tabooWords";
-import { GAME_MODE_PROMPTS } from "../lib/coachPrompt";
+import { GAME_MODE_PROMPTS, PACE_MODIFIERS } from "../lib/coachPrompt";
 import { 
   storeFeedbackSession, 
   generateWeeklyAnalysis, 
@@ -108,6 +108,7 @@ export default function RealtimeClient() {
   const [currentWordGuessed, setCurrentWordGuessed] = useState<boolean>(false);
   const [userDescriptionForFeedback, setUserDescriptionForFeedback] = useState<string>("");
   const [feedbackSessionStart, setFeedbackSessionStart] = useState<Date | null>(null);
+  const isTransitioningFromFeedback = useRef<boolean>(false);
   const [showProgressDashboard, setShowProgressDashboard] = useState<boolean>(false);
   const messageSequenceRef = useRef(0);
   
@@ -192,7 +193,7 @@ export default function RealtimeClient() {
   const [isPushToTalk, setIsPushToTalk] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [silenceDuration, setSilenceDuration] = useState<number>(3500); // Default 3.5 seconds
-  const [selectedVoice, setSelectedVoice] = useState<'alloy' | 'echo' | 'fable' | 'onyx' | 'nova' | 'shimmer' | 'verse'>('verse'); // Default voice
+  const [selectedVoice, setSelectedVoice] = useState<'alloy' | 'echo' | 'fable' | 'onyx' | 'nova' | 'shimmer' | 'verse' | 'marin' | 'cedar'>('marin'); // Default to marin for best quality
   
   // Voice Activity Tuning - Kullanıcı davranış analizi 🎯
   const [speechAnalytics, setSpeechAnalytics] = useState({
@@ -368,23 +369,21 @@ export default function RealtimeClient() {
       setRecentlyUnlocked(prev => prev.filter(w => w !== word));
     }, 3000);
     
-    // AI'a unlock durumunu bildir - but don't treat as final answer
-    if (dcRef.current?.readyState === "open") {
-      dcRef.current.send(JSON.stringify({
-        type: "conversation.item.create",
-        item: {
-          type: "message",
-          role: "user",
-          content: [{ 
-            type: "input_text", 
-            text: `System: AI correctly guessed forbidden word "${word}" - this unlocks it for Kez. This is NOT the final answer, just unlocking strategy. Wait for the main word.` 
-          }]
-        }
-      }));
-      
-      // Safe AI response request - acknowledge unlock but don't celebrate as final
-      createSafeResponse(`Ah, you're unlocking "${word}"! Smart strategy, Kez. Ready for the main word?`);
-    }
+    // Add system message to conversation (visual feedback only)
+    const systemUnlockMessage = {
+      id: `system-unlock-${word}-${Date.now()}`,
+      role: "system" as const,
+      content: `🔓 Word "${word}" unlocked! AI can now use this word freely.`,
+      timestamp: new Date(),
+      isComplete: true,
+      sequence: messageSequenceRef.current++
+    };
+    
+    setConversation(prev => [...prev, systemUnlockMessage]);
+    console.log(`🔓 System message added: Word "${word}" unlocked`);
+    
+    // DON'T tell AI about unlock - let conversation flow naturally
+    // AI will continue with regular conversation without unlock acknowledgment
   };
   
   const handleUserForbiddenWord = (word: string) => {
@@ -468,7 +467,7 @@ export default function RealtimeClient() {
       type: 'forbidden'
     });
     
-    // Notify AI about forbidden word usage
+    // Notify AI about forbidden word usage (RED BUZZER scenario)
     if (dcRef.current?.readyState === "open") {
       dcRef.current.send(JSON.stringify({
         type: "conversation.item.create",
@@ -477,7 +476,15 @@ export default function RealtimeClient() {
           role: "system",
           content: [{
             type: "input_text",
-            text: `Kez used a forbidden word. Please acknowledge this briefly and announce we're moving to a new word. Be encouraging!`
+            text: `🔴 FORBIDDEN WORD - NEXT WORD TRANSITION!
+
+Kez used a forbidden word and chose to move to the next word.
+This is a LEARNING moment, not a failure!
+
+Say something supportive like:
+"No worries, Kez! That word was tricky. Let's try a fresh one - you've got this!"
+
+Keep it brief, encouraging, and immediately transition to waiting for the new word!`
           }]
         }
       }));
@@ -507,6 +514,27 @@ export default function RealtimeClient() {
     setFeedbackSessionStart(new Date()); // Start timing the feedback session
     
     console.log("💬 FEEDBACK MODE ACTIVATED - AI should be able to respond now");
+    
+    // Notify AI about coach feedback choice
+    if (dcRef.current?.readyState === "open") {
+      dcRef.current.send(JSON.stringify({
+        type: "conversation.item.create",
+        item: {
+          type: "message",
+          role: "system",
+          content: [{
+            type: "input_text",
+            text: `💬 FRIENDLY COACHING MODE! 
+
+Kez chose to get feedback on her description of "${currentWord.word}". 
+She said: "${userDescriptionForFeedback}"
+
+Switch to natural teacher mode - have a friendly conversation about her English, not a formal lesson! Sound like you're chatting with a student, mixing encouragement with helpful tips naturally.`
+          }]
+        }
+      }));
+      console.log(`🎓 Notified AI: Natural coaching mode for "${currentWord.word}"`);
+    }
     
     // Check connection status and recover if needed
     if (!dcRef.current || dcRef.current.readyState !== "open") {
@@ -565,34 +593,33 @@ export default function RealtimeClient() {
     
         // Send voice feedback request to AI
         try {
-        const feedbackPrompt = `🎯 ENGLISH COACH FEEDBACK MODE ACTIVATED! 
-        
-        You are Kez's English teacher providing personalized language learning feedback. Kez just described the word "${currentWord.word}" and wants to improve her English.
-        
-        📚 STUDENT'S DESCRIPTION:
-        "${userDescriptionForFeedback || "No description recorded yet"}"
-        
-        🎯 TARGET WORD: ${currentWord.word}
-        🚫 FORBIDDEN WORDS: ${currentWord.forbidden.join(", ")}
-        
-        IMPORTANT FORMATTING: Please structure your feedback with clear sections and line breaks. Use this exact format:
-        
-        1. 🎉 ENCOURAGEMENT: 
-        [Praise what she did well in her description]
-        
-        2. ✏️ GRAMMAR & STRUCTURE: 
-        [Point out any grammar mistakes, incorrect verb tenses, or sentence structure issues with specific corrections]
-        
-        3. 📖 VOCABULARY: 
-        [Suggest better word choices or more natural expressions she could have used]
-        
-        4. 🗣️ FLUENCY: 
-        [Comment on sentence flow and natural English expression]
-        
-        5. 💡 BETTER DESCRIPTION: 
-        [Show how YOU would describe the target word WITHOUT using any forbidden words OR the target word itself]
-        
-        Remember: Be specific and focus on Kez's actual mistakes. No generic advice!`;
+        const feedbackPrompt = `💬 NATURAL COACHING CONVERSATION
+
+You are Kez's friendly English teacher having a warm, encouraging conversation about her description. Be conversational and supportive - like a real teacher chatting with a student.
+
+Kez just described "${currentWord.word}" by saying: "${userDescriptionForFeedback || "No description recorded yet"}"
+
+🎯 COVER THESE AREAS IN A NATURAL, FLOWING CONVERSATION:
+
+1. GRAMMAR & STRUCTURE: Point out any grammar mistakes, verb tenses, or sentence structure issues - but naturally! Use phrases like "I noticed you said..." or "Just a tiny adjustment..."
+
+2. VOCABULARY: Suggest better word choices or more natural expressions she could have used - mix this into the conversation casually.
+
+3. FLUENCY: Comment on sentence flow and natural English expression - encourage her natural speaking style.
+
+4. BETTER DESCRIPTION EXAMPLE: End by showing how YOU would describe "${currentWord.word}" WITHOUT using these forbidden words: ${currentWord.forbidden.join(", ")} - and WITHOUT using the word "${currentWord.word}" itself!
+
+STYLE GUIDELINES:
+- Sound like you're having a friendly chat, not giving a formal lesson
+- Mix encouragement naturally throughout 
+- Use transition phrases: "I noticed that...", "One thing you could try...", "You did great with..."
+- Keep it flowing and conversational
+- Be warm and supportive
+
+EXAMPLE STRUCTURE:
+"Hey Kez, that was really clever! [encouragement] I noticed you said [grammar point] - just a tiny adjustment: [correction]. For vocabulary, you could also try [vocabulary suggestions]. You're getting so much more fluent! [fluency comment] Let me show you how I might describe it: [better description without forbidden words]"
+
+Now give Kez natural, conversational feedback covering all these areas!`;
 
       // Send system message first
       dcRef.current.send(JSON.stringify({
@@ -784,42 +811,89 @@ You are the GUESSER again. Wait for Kez to describe the NEW word and try to gues
       setGameRoundActive(true);
       console.log("🎮 New Taboo round started - all forbidden words active:", currentWord.forbidden);
       
-      // Inform AI about the new word and round
+      // Inform AI about the new word and round (only for non-feedback transitions)
       if (dcRef.current && dcRef.current.readyState === "open") {
-        dcRef.current.send(JSON.stringify({
-          type: "conversation.item.create",
-          item: {
-            type: "message",
-            role: "system",
-            content: [{
-              type: "input_text",
-              text: `🎯 NEW TABOO ROUND! 
+        // Check if this is coming from a feedback success using the flag
+        if (!isTransitioningFromFeedback.current) {
+          dcRef.current.send(JSON.stringify({
+            type: "conversation.item.create",
+            item: {
+              type: "message",
+              role: "system",
+              content: [{
+                type: "input_text",
+                text: `🎯 NEW TABOO ROUND! 
 
-TARGET WORD: ${currentWord.word}
-FORBIDDEN WORDS: ${currentWord.forbidden.join(", ")}
+We're starting a new word guessing game. You are the GUESSER. Kez will describe a new word and you need to guess it based ONLY on her description. 
 
-You are the GUESSER. Kez will now describe this word and you need to guess it. Listen carefully to her description and make your best guesses!`
-            }]
-          }
-        }));
-        console.log(`📢 Informed AI: New round started with word "${currentWord.word}"`);
+🗣️ SPEAKING PRACTICE FOCUS: 
+- DON'T guess immediately! Kez needs speaking practice.
+- Ask 1-2 follow-up questions first: "Tell me more!", "What else?", "How do people use it?"
+- THEN make your guess after she's given more details.
+
+Important: You should NOT know what the word is yet - wait for Kez to describe it, ask questions for more practice, then make your best guesses!
+
+There are some forbidden words that Kez cannot use: ${currentWord.forbidden.join(", ")}. If she uses any of these, the round will end.`
+              }]
+            }
+          }));
+          console.log(`📢 Informed AI: New round started with word "${currentWord.word}"`);
+        } else {
+          console.log(`🎉 Skipping generic new round message - this is a feedback success transition`);
+        }
       }
     }
   };
 
   const nextTabooWord = () => {
-    console.log("✅ User marked word as correct - clearing conversation for fresh start");
-    setConversation([]);
-    messageSequenceRef.current = 0;
+    console.log("✅ User marked word as correct - preserving conversation history");
     setTabooScore(prev => prev + 1);
     getNewTabooWord();
   };
 
   const skipTabooWord = () => {
-    console.log("⏭️ User manually skipped word - clearing conversation for fresh start");
-    setConversation([]);
-    messageSequenceRef.current = 0;
+    console.log("⏭️ User manually skipped word - preserving conversation history");
     getNewTabooWord();
+  };
+
+  // NEW: Separate function for feedback mode next word (success scenario)
+  const nextWordAfterFeedback = () => {
+    console.log("🎉 Moving to next word after successful feedback session");
+    
+    // Set flag to indicate this transition is from feedback success
+    isTransitioningFromFeedback.current = true;
+    
+    // Send positive reinforcement message BEFORE changing word
+    if (dcRef.current?.readyState === "open") {
+      dcRef.current.send(JSON.stringify({
+        type: "conversation.item.create",
+        item: {
+          type: "message",
+          role: "system",
+          content: [{
+            type: "input_text",
+            text: `🎉 SUCCESSFUL WORD COMPLETION! 
+
+Kez successfully worked through the word "${currentWord?.word}" with your help and feedback! 
+This is a CELEBRATION moment!
+
+Say something like:
+"Fantastic work on '${currentWord?.word}', Kez! You really improved with that feedback. I'm excited to see how you handle the next word!"
+
+Be enthusiastic and congratulatory - then wait for her to describe the new word!`
+          }]
+        }
+      }));
+    }
+    
+    // Small delay to ensure the congratulatory message is processed first
+    setTimeout(() => {
+      getNewTabooWord();
+      // Reset flag after word change
+      setTimeout(() => {
+        isTransitioningFromFeedback.current = false;
+      }, 500);
+    }, 100);
   };
 
   // Function Call Handler - Phase 2 🎮
@@ -991,10 +1065,8 @@ You are the GUESSER. Kez will now describe this word and you need to guess it. L
   const progressToNextWord = () => {
     log.game("➡️ User chose to progress to next word");
     
-    // Clear conversation for fresh start with new word
-    console.log("⏭️ Progressing to next word - clearing conversation for fresh start");
-    setConversation([]);
-    messageSequenceRef.current = 0;
+    // DON'T clear conversation - preserve history for user to see
+    console.log("⏭️ Progressing to next word - preserving conversation history");
     
     // Clear timer and hide popup
     if (progressionTimer) {
@@ -1008,7 +1080,7 @@ You are the GUESSER. Kez will now describe this word and you need to guess it. L
     setUserDescriptionForFeedback(""); // Clear previous descriptions
     setFeedbackSessionStart(null); // Reset session timing
     
-    // Notify AI about forbidden word usage ONLY when progressing
+    // Notify AI about word progression ONLY when progressing
     if (dcRef.current?.readyState === "open") {
       dcRef.current.send(JSON.stringify({
         type: "conversation.item.create",
@@ -1017,7 +1089,7 @@ You are the GUESSER. Kez will now describe this word and you need to guess it. L
           role: "system",
           content: [{
             type: "input_text",
-            text: `Kez used a forbidden word. Please acknowledge this briefly and announce we're moving to a new word. Be encouraging!`
+            text: `We're moving to a new word now. Please announce that we're starting fresh with a new word and wait for Kez to describe it. You should not know what the new word is yet!`
           }]
         }
       }));
@@ -1168,22 +1240,26 @@ You are the GUESSER. Kez will now describe this word and you need to guess it. L
     setCurrentWordGuessed(true);
     setTabooScore(prev => prev + 1);
     
-    // AI'a başarı mesajı gönder (tek sefer)
+    // AI'ya doğru tahmin ettiğini bildir ve sessiz kalmasını söyle
     if (dcRef.current?.readyState === "open") {
       dcRef.current.send(JSON.stringify({
         type: "conversation.item.create",
         item: {
           type: "message",
-          role: "user",
+          role: "system",
           content: [{ 
             type: "input_text", 
-            text: `YES! Correct! The word was "${currentWordRef_current.word}". Great job!` 
+            text: `🎯 CORRECT GUESS ACHIEVED! You guessed "${currentWordRef_current.word}" correctly! 
+
+🔇 IMPORTANT: Now STAY SILENT and wait. Kez will choose her next action:
+- She might want coach feedback on her description
+- Or she might want to move to the next word immediately
+
+DO NOT speak until she makes her choice. This is her decision moment.` 
           }]
         }
       }));
-
-      // AI celebration
-      createSafeResponse(`🎉 Excellent, Kez! That was "${currentWordRef_current.word}"! Amazing description!`);
+      console.log(`🎯 Notified AI: Correct guess "${currentWordRef_current.word}" - waiting for user choice`);
     }
     
     // Show GREEN buzzer popup for correct guess - NO TIMER!
@@ -1236,19 +1312,23 @@ You are the GUESSER. Kez will now describe this word and you need to guess it. L
     }
   }, [currentWord]);
 
-  // Dynamic prompt generation for Taboo mode
-  const getCurrentPrompt = (mode: GameMode) => {
-    if (mode === "taboo") {
-      return `🚫 You are the GUESSER in this Taboo game with Kez!
+  // Dynamic prompt generation with pace control (replaces temperature)
+  const getCurrentPrompt = (mode: GameMode, currentPace: Pace = pace) => {
+    let basePrompt = mode === "taboo" 
+      ? `🚫 You are the GUESSER in this Taboo game with Kez!
 
-RULES:
+SPEAKING PRACTICE RULES:
 - Kez describes a word, you guess it
-- Be brief: "Is it [guess]?" or "Could it be [word]?"
+- DON'T guess immediately! Ask follow-up questions first
+- "Tell me more!", "What else?", "How big is it?"
+- THEN guess: "Is it [guess]?" or "Could it be [word]?"
 - Keep greetings short: Just say "Ready!" or "Let's play!"
 
-Wait for Kez to describe something, then guess! 🎲`;
-    }
-    return GAME_MODE_PROMPTS[mode];
+Wait for Kez to describe, ask questions, THEN guess! 🎲`
+      : GAME_MODE_PROMPTS[mode];
+
+    // Add pace-based tone control (replaces temperature parameter)
+    return basePrompt + PACE_MODIFIERS[currentPace];
   };
 
   const sendSessionUpdate = (currentPace: Pace, currentGameMode: GameMode, currentSilenceDuration?: number, useOptimalThreshold?: boolean) => {
@@ -1266,15 +1346,16 @@ Wait for Kez to describe something, then guess! 🎲`;
       dcRef.current.send(JSON.stringify({
         type: "session.update",
         session: {
-          instructions: getCurrentPrompt(currentGameMode),
+          instructions: getCurrentPrompt(currentGameMode, currentPace),
           voice: selectedVoice, // Update voice in session
           turn_detection: {
             type: "server_vad",
-            threshold: threshold, // Optimal threshold veya default
-            prefix_padding_ms: 800, // Increased from 500ms to 800ms for better noise filtering
-            silence_duration_ms: currentSilenceDuration || silenceDuration // Kullanıcı ayarı
+            threshold: Math.max(threshold, 0.95), // Minimum 0.95 for background noise filtering
+            prefix_padding_ms: 300, // Reduced for quicker detection
+            silence_duration_ms: currentSilenceDuration || Math.max(silenceDuration, 1200), // Minimum 1200ms
+            idle_timeout_ms: 10000 // Auto-prompt after 10 seconds of silence
           },
-          temperature: currentPace === "slow" ? 0.6 : currentPace === "fast" ? 1.0 : 0.8,
+          // temperature removed in GA version - use prompting for tone control
           modalities: ["audio", "text"], // Ensure both audio and text are enabled
           output_audio_format: "pcm16",
           input_audio_transcription: {
@@ -1299,7 +1380,7 @@ Wait for Kez to describe something, then guess! 🎲`;
       const sess = await fetch("/api/realtime-session", { 
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ gameMode, voice: selectedVoice })
+        body: JSON.stringify({ gameMode, voice: selectedVoice, pace })
       }).then(r=>r.json());
       console.log("EPHEMERAL SESSION:", sess);
       const token = sess?.client_secret?.value;
@@ -2145,13 +2226,15 @@ Wait for Kez to describe something, then guess! 🎲`;
                       fontSize: "16px"
                     }}
                   >
+                    <option value="marin">🌟 Marin (Premium Quality) - NEW!</option>
+                    <option value="cedar">🌟 Cedar (Premium Quality) - NEW!</option>
                     <option value="alloy">Alloy (Neutral)</option>
                     <option value="echo">Echo (Male)</option>
                     <option value="fable">Fable (British Male)</option>
                     <option value="onyx">Onyx (Deep Male)</option>
                     <option value="nova">Nova (Female)</option>
                     <option value="shimmer">Shimmer (Soft Female)</option>
-                    <option value="verse">Verse (Default)</option>
+                    <option value="verse">Verse (Classic)</option>
                   </select>
                 </label>
                 <div style={{fontSize: "14px", color: "#666", marginTop: "5px"}}>
@@ -2308,11 +2391,23 @@ Wait for Kez to describe something, then guess! 🎲`;
                 })}
               </div>
               
-              {/* Skip button with distinctive styling */}
+              {/* Dynamic button: Skip Word or Next Word based on feedback mode */}
               <button
-                onClick={skipTabooWord}
+                onClick={isInFeedbackMode ? () => {
+                  console.log("➡️ Next Word clicked from feedback mode");
+                  // This is GREEN BUZZER + FEEDBACK scenario - use dedicated function
+                  setIsInFeedbackMode(false);
+                  isInFeedbackModeRef.current = false;
+                  nextWordAfterFeedback(); // Use new dedicated function
+                } : () => {
+                  // This is regular SKIP WORD scenario (forbidden word/red buzzer)
+                  console.log("⏭️ Skip Word clicked - forbidden word scenario");
+                  skipTabooWord();
+                }}
                 style={{
-                  background: "linear-gradient(135deg, #FF6B6B 0%, #FF8E53 100%)",
+                  background: isInFeedbackMode 
+                    ? "linear-gradient(135deg, #4CAF50 0%, #66BB6A 100%)" // Green for Next Word
+                    : "linear-gradient(135deg, #FF6B6B 0%, #FF8E53 100%)", // Orange for Skip Word
                   color: "white",
                   border: "none",
                   borderRadius: "12px",
@@ -2321,21 +2416,33 @@ Wait for Kez to describe something, then guess! 🎲`;
                   fontWeight: "bold",
                   cursor: "pointer",
                   transition: "all 0.3s ease",
-                  boxShadow: "0 4px 12px rgba(255, 107, 107, 0.4)",
+                  boxShadow: isInFeedbackMode 
+                    ? "0 4px 12px rgba(76, 175, 80, 0.4)" // Green shadow
+                    : "0 4px 12px rgba(255, 107, 107, 0.4)", // Orange shadow
                   marginTop: "auto" // Push to bottom
                 }}
                 onMouseOver={(e) => {
-                  e.currentTarget.style.background = "linear-gradient(135deg, #FF5252 0%, #FF7043 100%)";
+                  if (isInFeedbackMode) {
+                    e.currentTarget.style.background = "linear-gradient(135deg, #43A047 0%, #5CB860 100%)";
+                    e.currentTarget.style.boxShadow = "0 6px 16px rgba(76, 175, 80, 0.5)";
+                  } else {
+                    e.currentTarget.style.background = "linear-gradient(135deg, #FF5252 0%, #FF7043 100%)";
+                    e.currentTarget.style.boxShadow = "0 6px 16px rgba(255, 107, 107, 0.5)";
+                  }
                   e.currentTarget.style.transform = "translateY(-2px)";
-                  e.currentTarget.style.boxShadow = "0 6px 16px rgba(255, 107, 107, 0.5)";
                 }}
                 onMouseOut={(e) => {
-                  e.currentTarget.style.background = "linear-gradient(135deg, #FF6B6B 0%, #FF8E53 100%)";
+                  if (isInFeedbackMode) {
+                    e.currentTarget.style.background = "linear-gradient(135deg, #4CAF50 0%, #66BB6A 100%)";
+                    e.currentTarget.style.boxShadow = "0 4px 12px rgba(76, 175, 80, 0.4)";
+                  } else {
+                    e.currentTarget.style.background = "linear-gradient(135deg, #FF6B6B 0%, #FF8E53 100%)";
+                    e.currentTarget.style.boxShadow = "0 4px 12px rgba(255, 107, 107, 0.4)";
+                  }
                   e.currentTarget.style.transform = "translateY(0)";
-                  e.currentTarget.style.boxShadow = "0 4px 12px rgba(255, 107, 107, 0.4)";
                 }}
               >
-                ⏭️ Skip Word
+                {isInFeedbackMode ? "➡️ Next Word" : "⏭️ Skip Word"}
               </button>
             </div>
             
@@ -2374,6 +2481,32 @@ Wait for Kez to describe something, then guess! 🎲`;
                     🎮 Taboo Game Conversation
                   </h3>
                 </div>
+
+                {/* Unlock Notifications Area */}
+                {recentlyUnlocked.length > 0 && (
+                  <div style={{
+                    marginBottom: "15px",
+                    flexShrink: 0
+                  }}>
+                    {recentlyUnlocked.map((word, index) => (
+                      <div key={`unlock-${word}-${index}`} style={{
+                        background: "linear-gradient(135deg, #FFA726 0%, #FF7043 100%)",
+                        color: "white",
+                        padding: "8px 16px",
+                        borderRadius: "25px",
+                        margin: "5px 0",
+                        fontSize: "14px",
+                        fontWeight: "bold",
+                        textAlign: "center",
+                        boxShadow: "0 3px 10px rgba(255, 167, 38, 0.3)",
+                        animation: "fadeInScale 0.5s ease-out",
+                        border: "2px solid #FF8A65"
+                      }}>
+                        🔓 Word "{word}" is now unlocked! AI can use it freely.
+                      </div>
+                    ))}
+                  </div>
+                )}
 
                 {/* Scrollable messages area */}
                 <div style={{
@@ -2434,7 +2567,6 @@ Wait for Kez to describe something, then guess! 🎲`;
                   )}
                   
                   {conversation
-                    .filter(msg => msg.role !== "system") // Hide system messages from UI
                     .sort((a, b) => {
                       // Primary sort: timestamp DESC (newest on top)
                       const timeDiff = b.timestamp.getTime() - a.timestamp.getTime();
@@ -2450,23 +2582,27 @@ Wait for Kez to describe something, then guess! 🎲`;
                       (msg.content.toLowerCase().includes("is it") || 
                        msg.content.toLowerCase().includes("could it be") ||
                        msg.content.toLowerCase().includes("might it be"));
+                    const isSystemMessage = msg.role === "system";
     
                     return (
                       <div
                         key={msg.id}
                         style={{
-                          marginBottom: "15px",
-                          padding: "12px 16px",
-                          borderRadius: "12px",
-                          background: msg.role === "user" 
-                            ? "linear-gradient(135deg, #667eea 0%, #764ba2 100%)"
-                            : isGuess
-                            ? "linear-gradient(135deg, #f093fb 0%, #f5576c 100%)"
-                            : "linear-gradient(135deg, #4facfe 0%, #00f2fe 100%)",
+                          marginBottom: isSystemMessage ? "8px" : "15px",
+                          padding: isSystemMessage ? "8px 12px" : "12px 16px",
+                          borderRadius: isSystemMessage ? "8px" : "12px",
+                          background: isSystemMessage
+                            ? "linear-gradient(135deg, #9E9E9E 0%, #757575 100%)" // Gray for system
+                            : msg.role === "user" 
+                              ? "linear-gradient(135deg, #667eea 0%, #764ba2 100%)"
+                              : isGuess
+                              ? "linear-gradient(135deg, #f093fb 0%, #f5576c 100%)"
+                              : "linear-gradient(135deg, #4facfe 0%, #00f2fe 100%)",
                           color: "white",
-                          boxShadow: "0 3px 10px rgba(0,0,0,0.15)",
-                          fontSize: "14px",
-                          lineHeight: "1.4"
+                          boxShadow: isSystemMessage ? "0 2px 6px rgba(0,0,0,0.1)" : "0 3px 10px rgba(0,0,0,0.15)",
+                          fontSize: isSystemMessage ? "12px" : "14px",
+                          lineHeight: "1.4",
+                          opacity: isSystemMessage ? 0.9 : 1
                         }}
                       >
                         <div style={{ 
@@ -2475,7 +2611,8 @@ Wait for Kez to describe something, then guess! 🎲`;
                           fontSize: "12px",
                           opacity: 0.9
                         }}>
-                          {msg.role === "user" ? "🎤 Kez" : "🤖 AI"} • {msg.timestamp.toLocaleTimeString()}
+                          {isSystemMessage ? "⚙️ System" : 
+                           msg.role === "user" ? "🎤 Kez" : "🤖 AI"} • {msg.timestamp.toLocaleTimeString()}
                           {isGuess && " • 🎯 GUESS"}
                         </div>
                         <div>{msg.content}</div>
@@ -2548,32 +2685,36 @@ Wait for Kez to describe something, then guess! 🎲`;
           )}
           
           {conversation
-            .filter(msg => msg.role !== "system") // Hide system messages from UI
             .sort((a, b) => b.sequence - a.sequence) // Sort by sequence DESC (newest on top)
             .map((msg) => {
             // This is non-taboo mode conversation display
             const isTabooGuess = false; // Not applicable in non-taboo modes
+            const isSystemMessage = msg.role === "system";
             
             // Düzeltmeleri tespit et (🔧 işareti olan mesajlar)
             const isCorrection = msg.role === "assistant" && msg.content.includes("🔧");
             
             return (
               <div key={msg.id} style={{
-                margin: "15px 0",
-                padding: "15px 20px",
-                borderRadius: "15px",
-                background: msg.role === "user" 
-                  ? "linear-gradient(135deg, #667eea 0%, #764ba2 100%)"
-                  : isTabooGuess 
-                    ? "linear-gradient(135deg, #4CAF50 0%, #45a049 100%)"
-                    : isCorrection
-                      ? "linear-gradient(135deg, #ff9800 0%, #f57c00 100%)"
-                      : `linear-gradient(135deg, ${currentMode.color} 0%, ${currentMode.color}90 100%)`,
+                margin: isSystemMessage ? "8px 0" : "15px 0",
+                padding: isSystemMessage ? "8px 15px" : "15px 20px",
+                borderRadius: isSystemMessage ? "8px" : "15px",
+                background: isSystemMessage
+                  ? "linear-gradient(135deg, #9E9E9E 0%, #757575 100%)" // Gray for system
+                  : msg.role === "user" 
+                    ? "linear-gradient(135deg, #667eea 0%, #764ba2 100%)"
+                    : isTabooGuess 
+                      ? "linear-gradient(135deg, #4CAF50 0%, #45a049 100%)"
+                      : isCorrection
+                        ? "linear-gradient(135deg, #ff9800 0%, #f57c00 100%)"
+                        : `linear-gradient(135deg, ${currentMode.color} 0%, ${currentMode.color}90 100%)`,
                 color: "white",
-                boxShadow: "0 4px 15px rgba(0,0,0,0.1)",
+                boxShadow: isSystemMessage ? "0 2px 8px rgba(0,0,0,0.1)" : "0 4px 15px rgba(0,0,0,0.1)",
                 border: isTabooGuess ? "3px solid #4CAF50" : isCorrection ? "3px solid #ff9800" : "none",
                 transform: (isTabooGuess || isCorrection) ? "scale(1.02)" : "scale(1)",
-                transition: "all 0.3s ease"
+                transition: "all 0.3s ease",
+                fontSize: isSystemMessage ? "14px" : "16px",
+                opacity: isSystemMessage ? 0.9 : 1
               }}>
                 <div style={{
                   fontSize: "14px", 
@@ -2581,7 +2722,8 @@ Wait for Kez to describe something, then guess! 🎲`;
                   marginBottom: "8px",
                   fontWeight: "bold"
                 }}>
-                  {msg.role === "user" ? "🗣️ Kez" : 
+                  {isSystemMessage ? "⚙️ System" :
+                   msg.role === "user" ? "🗣️ Kez" : 
                    isTabooGuess ? "🎯 AI Guess!" : 
                    isCorrection ? "🔧 English Correction" : "🎯 Coach"} • {msg.timestamp.toLocaleTimeString()}
                 </div>
