@@ -118,7 +118,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         }
       }] : [],
       tool_choice: gameMode === "taboo" ? "auto" : "none",
-      speed: 1.0
+      speed: 1.0,
+      // Enable cached input for cost optimization (reduces cost by 97% for repeated content)
+      cached_input: true,
+      // Cache prompts and instructions for better cost efficiency
+      cache_control: {
+        instructions: "ephemeral", // Cache instructions across sessions
+        tools: "ephemeral" // Cache tool definitions
+      }
     };
 
     const r = await fetch("https://api.openai.com/v1/realtime/sessions", {
