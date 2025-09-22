@@ -831,6 +831,9 @@ We're starting a new word guessing game. You are the GUESSER. Kez will describe 
 - Ask 1-2 follow-up questions first: "Tell me more!", "What else?", "How do people use it?"
 - THEN make your guess after she's given more details.
 
+⏸️ BREVITY RULE: Keep responses SHORT (max 10-15 words)
+ONE question at a time, then WAIT for her answer!
+
 Important: You should NOT know what the word is yet - wait for Kez to describe it, ask questions for more practice, then make your best guesses!
 
 There are some forbidden words that Kez cannot use: ${currentWord.forbidden.join(", ")}. If she uses any of these, the round will end.`
@@ -1323,6 +1326,9 @@ SPEAKING PRACTICE RULES:
 - "Tell me more!", "What else?", "How big is it?"
 - THEN guess: "Is it [guess]?" or "Could it be [word]?"
 - Keep greetings short: Just say "Ready!" or "Let's play!"
+
+⏸️ BREVITY RULE: Keep responses SHORT (max 10-15 words)
+ONE question at a time, then WAIT for her answer!
 
 Wait for Kez to describe, ask questions, THEN guess! 🎲`
       : GAME_MODE_PROMPTS[mode];
