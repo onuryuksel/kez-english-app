@@ -192,7 +192,7 @@ export default function RealtimeClient() {
   const [showUsageStats, setShowUsageStats] = useState(false);
   const [isPushToTalk, setIsPushToTalk] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
-  const [silenceDuration, setSilenceDuration] = useState<number>(3000); // Default 3 seconds - balanced thinking time for English learners
+  const [silenceDuration, setSilenceDuration] = useState<number>(4000); // Default 4 seconds - more patience for English learners
   const [selectedVoice, setSelectedVoice] = useState<'alloy' | 'echo' | 'fable' | 'onyx' | 'nova' | 'shimmer' | 'verse' | 'marin' | 'cedar'>('marin'); // Default to marin for best quality
   
   // Voice Activity Tuning - Kullanıcı davranış analizi 🎯
@@ -333,8 +333,8 @@ export default function RealtimeClient() {
         }
         
         if (speaker === 'ai') {
-          // AI said forbidden word - unlock it!
-          unlockForbiddenWord(forbiddenWord);
+          // AI said forbidden word - check if it's intentional unlock
+          handleAIForbiddenWord(forbiddenWord, text);
         } else {
           // User said ACTIVE forbidden word - buzzer!
           handleUserForbiddenWord(forbiddenWord);
@@ -344,6 +344,32 @@ export default function RealtimeClient() {
     }
   };
   
+  // Simplified AI forbidden word handler - unlock unless greeting or feedback
+  const handleAIForbiddenWord = (forbiddenWord: string, fullText: string) => {
+    const lowerText = fullText.toLowerCase();
+    
+    // DON'T unlock in these specific cases:
+    const isGreeting = lowerText.includes('ready to play') || 
+                      lowerText.includes('describe something') || 
+                      lowerText.includes('let\'s start') ||
+                      lowerText.includes('ready!');
+    
+    const isFeedbackMode = isInFeedbackModeRef.current;
+    
+    if (isGreeting) {
+      console.log(`🚫 GREETING: AI used "${forbiddenWord}" in greeting - NOT UNLOCKING`);
+      console.log(`📝 Context: "${fullText.slice(0, 100)}..."`);
+    } else if (isFeedbackMode) {
+      console.log(`🚫 FEEDBACK MODE: AI used "${forbiddenWord}" in feedback - NOT UNLOCKING`);
+      console.log(`📝 Context: "${fullText.slice(0, 100)}..."`);
+    } else {
+      // UNLOCK in all other game situations - this is much simpler!
+      console.log(`🎯 GAME MODE: AI used "${forbiddenWord}" in game context - UNLOCKING!`);
+      console.log(`📝 Context: "${fullText.slice(0, 100)}..."`);
+      unlockForbiddenWord(forbiddenWord);
+    }
+  };
+
   const unlockForbiddenWord = (word: string) => {
     log.game(`Word unlocked: "${word}"`);
     
@@ -371,7 +397,7 @@ export default function RealtimeClient() {
     
     // Add system message to conversation (visual feedback only)
     const systemUnlockMessage = {
-      id: `system-unlock-${word}-${Date.now()}`,
+      id: `system-unlock-${word}-${Date.now()}-${messageSequenceRef.current}`,
       role: "system" as const,
       content: `🔓 Word "${word}" unlocked! AI can now use this word freely.`,
       timestamp: new Date(),
@@ -594,6 +620,10 @@ Switch to natural teacher mode - have a friendly conversation about her English,
         // Send voice feedback request to AI
         try {
         const feedbackPrompt = `💬 NATURAL COACHING CONVERSATION
+
+🇬🇧 CRITICAL: ALWAYS RESPOND IN ENGLISH ONLY!
+- Even if Kez described in Turkish/other language, YOU give feedback in English
+- English immersion is key - help her think and learn in English!
 
 You are Kez's friendly English teacher having a warm, encouraging conversation about her description. Be conversational and supportive - like a real teacher chatting with a student.
 
@@ -823,6 +853,10 @@ You are the GUESSER again. Wait for Kez to describe the NEW word and try to gues
               content: [{
                 type: "input_text",
                 text: `🎯 NEW TABOO ROUND! 
+
+🇬🇧 CRITICAL: ALWAYS RESPOND IN ENGLISH ONLY!
+- Even if Kez describes in Turkish, YOU always respond in English
+- Guide her back to English: "Let's keep practicing in English, Kez!"
 
 We're starting a new word guessing game. You are the GUESSER. Kez will describe a new word and you need to guess it based ONLY on her description. 
 
@@ -1254,6 +1288,9 @@ Be enthusiastic and congratulatory - then wait for her to describe the new word!
             type: "input_text", 
             text: `🎯 CORRECT GUESS ACHIEVED! You guessed "${currentWordRef_current.word}" correctly! 
 
+🇬🇧 CRITICAL: ALWAYS RESPOND IN ENGLISH ONLY!
+- Even if Kez uses Turkish for her choice, YOU respond in English
+
 🔇 IMPORTANT: Now STAY SILENT and wait. Kez will choose her next action:
 - She might want coach feedback on her description
 - Or she might want to move to the next word immediately
@@ -1320,15 +1357,25 @@ DO NOT speak until she makes her choice. This is her decision moment.`
     let basePrompt = mode === "taboo" 
       ? `🚫 You are the GUESSER in this Taboo game with Kez!
 
-SPEAKING PRACTICE RULES:
-- Kez describes a word, you guess it
-- DON'T guess immediately! Ask follow-up questions first
-- "Tell me more!", "What else?", "How big is it?"
-- THEN guess: "Is it [guess]?" or "Could it be [word]?"
-- Keep greetings short: Just say "Ready!" or "Let's play!"
+🇬🇧 CRITICAL: ALWAYS RESPOND IN ENGLISH ONLY!
+- Even if Kez speaks Turkish while describing, YOU respond in English
+- Guide her gently: "Let's keep our English practice going, Kez!"
+- English immersion during games is crucial for learning!
 
-⏸️ BREVITY RULE: Keep responses SHORT (max 10-15 words)
-ONE question at a time, then WAIT for her answer!
+SMART CONVERSATION RULES:
+- Kez describes a word, you guess it
+- IF she asks a question → ANSWER directly! "Red!" "Big!" "Library!"
+- IF she describes → Ask follow-up: "Tell me more!" "What else?"
+- THEN guess after 2-3 exchanges: "Is it a pen?"
+- Keep greetings ultra short: "Ready!"
+
+🧠 PATIENCE & NATURAL CONVERSATION:
+- If Kez pauses mid-sentence, stay SILENT until she finishes!
+- Wait ~3 second after silence before replying
+- Speak warmly: "Okay.", "Got it.", "I'm listening."
+- Brief encouragement: "Good clue!", "Nice one!"
+- QUESTIONS need ANSWERS! DESCRIPTIONS need FOLLOW-UPS!
+- MAX 3-5 WORDS per response!
 
 Wait for Kez to describe, ask questions, THEN guess! 🎲`
       : GAME_MODE_PROMPTS[mode];
@@ -1341,7 +1388,7 @@ Wait for Kez to describe, ask questions, THEN guess! 🎲`
     if (dcRef.current && dcRef.current.readyState === "open") {
       const threshold = useOptimalThreshold && speechAnalytics.totalSpeechEvents >= 3 
         ? speechAnalytics.optimalThreshold 
-        : 0.9; // Increased from 0.8 to 0.9 for better noise filtering
+        : 0.95; // Consistent with API settings for reliable detection
       
       console.log("🎛️ Updating session with VAD settings:", {
         threshold,
@@ -1356,8 +1403,8 @@ Wait for Kez to describe, ask questions, THEN guess! 🎲`
           voice: selectedVoice, // Update voice in session
           turn_detection: {
             type: "server_vad",
-            threshold: Math.max(threshold, 0.95), // Minimum 0.95 for background noise filtering
-            prefix_padding_ms: 500, // More padding to catch the start of hesitant speech
+            threshold: Math.max(threshold, 0.95), // Balanced threshold for reliable speech detection
+            prefix_padding_ms: 800, // Much more padding to avoid cutting off user mid-sentence
                  silence_duration_ms: currentSilenceDuration || Math.max(silenceDuration, 3000), // Minimum 3000ms for thinking time
             idle_timeout_ms: 10000 // Auto-prompt after 10 seconds of silence
           },
@@ -1466,7 +1513,7 @@ Wait for Kez to describe, ask questions, THEN guess! 🎲`
               
               // Safe initial greeting response
               setTimeout(() => {
-                createSafeResponse(`Let's start!`);
+                createSafeResponse(`Ready!`);
               }, 200); // Small delay to ensure setup is complete
               
               // Temizle
@@ -1582,7 +1629,7 @@ Wait for Kez to describe, ask questions, THEN guess! 🎲`
               messageSequenceRef.current += 1;
               
               const userMessage = {
-                id: `user-${userTimestamp.getTime()}`,
+                id: `user-${userTimestamp.getTime()}-${messageSequenceRef.current}`,
                 role: "user" as const,
                 content: transcript,
                 timestamp: userTimestamp,
@@ -1922,9 +1969,9 @@ Wait for Kez to describe, ask questions, THEN guess! 🎲`
       
       // AI greeting'i DataChannel açıldıktan sonra gönder
       const greetingPrompts = {
-        casual: "Start by greeting Kez warmly and introduce yourself as her enthusiastic English conversation buddy! Be personal and energetic.",
+        casual:  "Start by greeting Kez warmly and introduce yourself as her enthusiastic English conversation buddy! Be personal and energetic.",
         roleplay: "Start by greeting Kez and introduce yourself as her roleplay English coach. Ask what scenario she'd like to practice today!",
-        taboo: "Start by greeting Kez warmly as her Taboo game partner! Let her know you're ready to guess whatever she describes to you. Wait for her to start describing something!"
+        taboo: "Say: 'Ready to play Taboo, Kez! Describe something!'"
       };
 
       // Greeting'i sakla - DataChannel açıldığında gönderilecek

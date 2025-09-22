@@ -40,7 +40,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             "Content-Type": "application/json",
             "User-Agent": "Local-Development-Proxy"
           },
-          body: JSON.stringify({ gameMode, voice })
+          body: JSON.stringify({ gameMode, voice, pace })
         });
         
         if (vercelResponse.ok) {
@@ -84,12 +84,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       },
       turn_detection: { 
         type: "server_vad", 
-        threshold: 0.95,  // Higher threshold to reduce background noise detection
+        threshold: 0.95,  // Balanced threshold for reliable speech detection
         create_response: true, 
         interrupt_response: true,
-        prefix_padding_ms: 300,  // Reduced padding for quicker detection
-        silence_duration_ms: 2000,  // Longer silence for English learners to think and formulate sentences
-        idle_timeout_ms: 10000  // NEW: Auto-prompt if user silent for 10 seconds
+        prefix_padding_ms: 800,  // Much more padding to avoid cutting off user mid-sentence
+        silence_duration_ms: 4000,  // 4 seconds silence for English learners to think fully
+        idle_timeout_ms: 15000  // Longer idle timeout - give user more time
       },
       output_audio_format: "pcm16",
       tools: gameMode === "taboo" ? [{
