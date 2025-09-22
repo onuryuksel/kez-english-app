@@ -84,7 +84,12 @@ const GAME_MODES = {
 };
 
 export default function RealtimeClient() {
-  console.log("🚀 RealtimeClient component is rendering!");
+  // Debug render count
+  const renderCountRef = useRef(0);
+  renderCountRef.current++;
+  if (renderCountRef.current % 10 === 0) { // Only log every 10th render
+    console.log(`🚀 RealtimeClient render #${renderCountRef.current}`);
+  }
   const [connected, setConnected] = useState(false);
   const [pace, setPace] = useState<Pace>("medium");
   const [gameMode, setGameMode] = useState<GameMode>("taboo");
@@ -1586,15 +1591,8 @@ Wait for Kez to describe something, then guess! 🎲`;
               }
               
               // REAL-TIME UI: Add AI message with actual content (no placeholder)  
-              // Use actual timestamp but ensure it's after the last user message
-              const now = Date.now();
-              const lastUserTime = conversation
-                .filter(msg => msg.role === "user")
-                .map(msg => msg.timestamp.getTime())
-                .sort((a, b) => b - a)[0] || 0;
-              
-              // Ensure AI timestamp is at least 2 seconds after last user message for proper ordering
-              const aiTimestamp = new Date(Math.max(now, lastUserTime + 2000));
+              // Always use current time - let messages appear in order they complete
+              const aiTimestamp = new Date();
               const currentSeq = messageSequenceRef.current;
               messageSequenceRef.current += 1;
               
