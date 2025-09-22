@@ -98,6 +98,11 @@ export default function RealtimeClient() {
   const [conversation, setConversation] = useState<ConversationMessage[]>([]);
   const [currentUserMessage, setCurrentUserMessage] = useState<string>("");
   const [currentAssistantMessage, setCurrentAssistantMessage] = useState<string>("");
+  
+  // Track AI response timing for accurate timestamps
+  const aiResponseStartTime = useRef<number | null>(null);
+  // Track user speech end time for accurate timestamps
+  const userSpeechEndTime = useRef<number | null>(null);
   const [isInFeedbackMode, setIsInFeedbackMode] = useState<boolean>(false);
   const isInFeedbackModeRef = useRef<boolean>(false);
   const [currentWordGuessed, setCurrentWordGuessed] = useState<boolean>(false);
@@ -1435,8 +1440,9 @@ Wait for Kez to describe something, then guess! 🎲`;
     // Priority System: Reset detection flag for new response
     setFunctionCallDetected(false);
     
-    // REAL-TIME UI: Add AI message immediately (like console)
-    const aiTimestamp = new Date();
+    // Track AI response start time for accurate timestamp calculation
+    aiResponseStartTime.current = Date.now();
+    
     const currentSeq = messageSequenceRef.current;
     messageSequenceRef.current += 1;
     
@@ -1458,6 +1464,13 @@ Wait for Kez to describe something, then guess! 🎲`;
             const speechEnd = msg.audio_end_ms || Date.now();
             log.debug("Speech stopped");
             
+            // audio_end_ms is relative timestamp from session start, not absolute
+            
+            // Record speech end time for accurate user timestamp
+            // If audio_end_ms is too small (relative timestamp), use current time
+            const isRelativeTimestamp = msg.audio_end_ms && msg.audio_end_ms < 1000000000000; // Less than year 2001
+            userSpeechEndTime.current = isRelativeTimestamp ? Date.now() : speechEnd;
+            
             if (speechAnalytics.lastSpeechStart > 0) {
               analyzeSpeechPattern(speechAnalytics.lastSpeechStart, speechEnd);
               // 3 konuşma sonrası optimal ayarları uygula
@@ -1476,8 +1489,8 @@ Wait for Kez to describe something, then guess! 🎲`;
             
             if (transcript) {
               // REAL-TIME UI: Use same logic as console - add message directly
-              // Use actual timestamp for user messages (they happen when they happen)
-              const userTimestamp = new Date();
+              // Use speech end time for accurate user timestamp (when they actually finished speaking)
+              const userTimestamp = new Date(userSpeechEndTime.current || Date.now());
               const currentSeq = messageSequenceRef.current;
               messageSequenceRef.current += 1;
               
@@ -1501,9 +1514,9 @@ Wait for Kez to describe something, then guess! 🎲`;
               
               // Add to conversation immediately (same as console logic)
               setConversation(prev => [...prev, userMessage]);
-              console.log(`✅ USER MESSAGE ADDED DIRECTLY: "${transcript}" [${userTimestamp.toLocaleTimeString()}] - Sequence: ${currentSeq} - DEBUG`);
+              console.log(`✅ USER MESSAGE ADDED DIRECTLY: "${transcript}" [${userTimestamp.toLocaleTimeString()}.${userTimestamp.getMilliseconds().toString().padStart(3, '0')}] - Sequence: ${currentSeq} - DEBUG`);
               console.log(`🔍 CONVERSATION ORDER DEBUG - Total messages: ${conversation.length + 1}, Latest sequence: ${currentSeq}`);
-              console.log(`⏰ TIMESTAMP DEBUG - User: ${userTimestamp.getTime()}, Formatted: ${userTimestamp.toLocaleTimeString()} (REAL TIME)`);
+              console.log(`⏰ TIMESTAMP DEBUG - User: ${userTimestamp.getTime()}, Formatted: ${userTimestamp.toLocaleTimeString()}.${userTimestamp.getMilliseconds().toString().padStart(3, '0')} (SPEECH END TIME)`);
               
               // Taboo forbidden word kontrolü - Kez'in konuşması
               checkForbiddenWords(transcript, 'user');
@@ -1590,9 +1603,11 @@ Wait for Kez to describe something, then guess! 🎲`;
                 return; // Skip processing
               }
               
-              // REAL-TIME UI: Add AI message with actual content (no placeholder)  
-              // Always use current time - let messages appear in order they complete
-              const aiTimestamp = new Date();
+              // REAL-TIME UI: Add AI message with actual content (no placeholder)  1.
+              // Use actual response duration instead of hardcoded delay
+              const responseStartTime = aiResponseStartTime.current || Date.now() - 1000;
+              const actualResponseDuration = Date.now() - responseStartTime;
+              const aiTimestamp = new Date(responseStartTime + actualResponseDuration);
               const currentSeq = messageSequenceRef.current;
               messageSequenceRef.current += 1;
               
@@ -1606,9 +1621,9 @@ Wait for Kez to describe something, then guess! 🎲`;
               };
               
               setConversation(prev => [...prev, finalAiMessage]);
-              console.log(`✅ AI MESSAGE ADDED: "${aiMessageContent}" [${aiTimestamp.toLocaleTimeString()}] - Sequence: ${currentSeq} - DEBUG`);
+              console.log(`✅ AI MESSAGE ADDED: "${aiMessageContent}" [${aiTimestamp.toLocaleTimeString()}.${aiTimestamp.getMilliseconds().toString().padStart(3, '0')}] - Sequence: ${currentSeq} - DEBUG`);
               console.log(`🔍 CONVERSATION ORDER DEBUG - Total messages: ${conversation.length + 1}, Latest sequence: ${currentSeq}`);
-              console.log(`⏰ TIMESTAMP DEBUG - AI: ${aiTimestamp.getTime()}, Formatted: ${aiTimestamp.toLocaleTimeString()} (SMART TIME: at least 1s after last user)`);
+              console.log(`⏰ TIMESTAMP DEBUG - AI: ${aiTimestamp.getTime()}, Formatted: ${aiTimestamp.toLocaleTimeString()}.${aiTimestamp.getMilliseconds().toString().padStart(3, '0')} (ACTUAL RESPONSE TIME: ${actualResponseDuration}ms)`);
               
               // Check if this is coach feedback and store the session
               if (isInFeedbackModeRef.current && feedbackSessionStart && currentWord) {
@@ -2420,7 +2435,15 @@ Wait for Kez to describe something, then guess! 🎲`;
                   
                   {conversation
                     .filter(msg => msg.role !== "system") // Hide system messages from UI
-                    .sort((a, b) => b.sequence - a.sequence) // Sort by sequence DESC (newest on top)
+                    .sort((a, b) => {
+                      // Primary sort: timestamp DESC (newest on top)
+                      const timeDiff = b.timestamp.getTime() - a.timestamp.getTime();
+                      // Secondary sort: if timestamps are very close (within 100ms), use sequence
+                      if (Math.abs(timeDiff) < 100) {
+                        return b.sequence - a.sequence;
+                      }
+                      return timeDiff;
+                    })
                     .map((msg) => {
                     // Taboo modunda AI'nin tahminlerini özel göster
                     const isGuess = gameMode === "taboo" && msg.role === "assistant" && 
