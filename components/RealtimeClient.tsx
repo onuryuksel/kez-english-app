@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { TABOO_WORDS } from "../lib/tabooWords";
 import { GAME_MODE_PROMPTS, PACE_MODIFIERS } from "../lib/coachPrompt";
+import { SYSTEM_MESSAGES, sendSystemMessage, createConversationHistoryMessage } from "../lib/systemMessages";
 import { 
   storeFeedbackSession, 
   generateWeeklyAnalysis, 
@@ -370,50 +371,47 @@ export default function RealtimeClient() {
     }
   };
 
-  const unlockForbiddenWord = (word: string) => {
-    log.game(`Word unlocked: "${word}"`);
+  const unlockForbiddenWord = (forbiddenWord: string) => {
+    log.game(`Word unlocked: "${forbiddenWord}"`);
     
     setForbiddenWordStatus(prev => {
       const newStatus = {
         ...prev,
-        [word]: 'unlocked' as const
+        [forbiddenWord]: 'unlocked' as const
       };
       
       // Update ref immediately for immediate access
       forbiddenWordStatusRef.current = newStatus;
       
       // Debug log with updated status
-      console.log(`🔓 WORD UNLOCKED: "${word}" - New status: ${JSON.stringify(newStatus)} - DEBUG`);
+      console.log(`🔓 WORD UNLOCKED: "${forbiddenWord}" - New status: ${JSON.stringify(newStatus)} - DEBUG`);
       return newStatus;
     });
     
     // Animation için recently unlocked'a ekle
-    setRecentlyUnlocked(prev => [...prev, word]);
+    setRecentlyUnlocked(prev => [...prev, forbiddenWord]);
     
     // 3 saniye sonra animation'ı kaldır
     setTimeout(() => {
-      setRecentlyUnlocked(prev => prev.filter(w => w !== word));
+      setRecentlyUnlocked(prev => prev.filter(w => w !== forbiddenWord));
     }, 3000);
     
     // Add system message to conversation (visual feedback only)
-    const systemUnlockMessage = {
-      id: `system-unlock-${word}-${Date.now()}-${messageSequenceRef.current}`,
-      role: "system" as const,
-      content: `🔓 Word "${word}" unlocked! AI can now use this word freely.`,
-      timestamp: new Date(),
-      isComplete: true,
-      sequence: messageSequenceRef.current++
-    };
+    const systemUnlockMessage = createConversationHistoryMessage(
+      "WORD_UNLOCKED", 
+      messageSequenceRef, 
+      forbiddenWord
+    );
     
     setConversation(prev => [...prev, systemUnlockMessage]);
-    console.log(`🔓 System message added: Word "${word}" unlocked`);
+    console.log(`🔓 System message added: Word "${forbiddenWord}" unlocked`);
     
     // DON'T tell AI about unlock - let conversation flow naturally
     // AI will continue with regular conversation without unlock acknowledgment
   };
   
-  const handleUserForbiddenWord = (word: string) => {
-    log.warn(`User used forbidden word: "${word}"`);
+  const handleUserForbiddenWord = (forbiddenWord: string) => {
+    log.warn(`User used forbidden word: "${forbiddenWord}"`);
     
     // 1. IMMEDIATELY STOP AI SPEAKING
     if (dcRef.current && dcRef.current.readyState === "open") {
@@ -425,24 +423,11 @@ export default function RealtimeClient() {
     
     // 2. PAUSE GAME - Prevent AI from responding during popup
     setGameRoundActive(false);
-    console.log(`🚨 GAME PAUSED - Forbidden word "${word}" used - DEBUG`);
+    console.log(`🚨 GAME PAUSED - Forbidden word "${forbiddenWord}" used - DEBUG`);
     
-    // 3. NOTIFY AI ABOUT FORBIDDEN WORD
-    if (dcRef.current && dcRef.current.readyState === "open") {
-      const notification = {
-        type: "conversation.item.create",
-        item: {
-          type: "message",
-          role: "system",
-          content: [{
-            type: "input_text",
-            text: `🚨 GAME EVENT: Kez used forbidden word "${word}". You should acknowledge this was forbidden and wait for the next instruction. Do not continue with the previous topic.`
-          }]
-        }
-      };
-      dcRef.current.send(JSON.stringify(notification));
-      console.log(`📢 NOTIFIED AI: Forbidden word "${word}" used`);
-    }
+    // 3. NOTIFY AI ABOUT FORBIDDEN WORD - ACTIVATE SILENCE MODE
+    sendSystemMessage(dcRef, "FORBIDDEN_WORD_USED", forbiddenWord);
+    console.log(`📢 NOTIFIED AI: Forbidden word "${forbiddenWord}" used - SILENCE MODE ACTIVATED`);
     
     // 4. CLEAR ANY CURRENT AI MESSAGE
     setCurrentAssistantMessage("");
@@ -450,14 +435,24 @@ export default function RealtimeClient() {
     // 5. Enhanced buzzer popup with choices - NO TIMER!
     setBuzzerPopup({
       show: true,
-      word: word,
-      message: `🚨 BUZZER! Kez used forbidden word "${word}"`,
+      word: forbiddenWord,
+      message: `🚨 BUZZER! Kez used forbidden word "${forbiddenWord}"`,
       showChoices: true,
       type: 'forbidden'
     });
     
+    // Add system message to conversation history (visual record)
+    const systemForbiddenWordMessage = createConversationHistoryMessage(
+      "FORBIDDEN_WORD_HISTORY", 
+      messageSequenceRef, 
+      forbiddenWord
+    );
+    
+    setConversation(prev => [...prev, systemForbiddenWordMessage]);
+    console.log(`🚨 System message added: Forbidden word "${forbiddenWord}" used`);
+    
     // DON'T auto-close popup - wait for user choice
-    console.log(`🚨 FORBIDDEN WORD USED: "${word}" - Waiting for user choice - DEBUG`);
+    console.log(`🚨 FORBIDDEN WORD USED: "${forbiddenWord}" - Waiting for user choice - DEBUG`);
   };
 
   // Enhanced buzzer popup choice handlers
@@ -477,8 +472,8 @@ export default function RealtimeClient() {
     setGameRoundActive(true);
     console.log(`🎮 GAME RESUMED - Continuing with current word - DEBUG`);
     
-    // AI acknowledgment
-    createSafeResponse(`Great! Let's continue with "${currentWord?.word}". Try describing it in a different way!`);
+    // Send system message for continuing with same word after forbidden word
+    sendSystemMessage(dcRef, "CONTINUE_AFTER_FORBIDDEN");
   };
 
   const handleBuzzerNextWord = () => {
@@ -494,27 +489,7 @@ export default function RealtimeClient() {
     });
     
     // Notify AI about forbidden word usage (RED BUZZER scenario)
-    if (dcRef.current?.readyState === "open") {
-      dcRef.current.send(JSON.stringify({
-        type: "conversation.item.create",
-        item: {
-          type: "message",
-          role: "system",
-          content: [{
-            type: "input_text",
-            text: `🔴 FORBIDDEN WORD - NEXT WORD TRANSITION!
-
-Kez used a forbidden word and chose to move to the next word.
-This is a LEARNING moment, not a failure!
-
-Say something supportive like:
-"No worries, Kez! That word was tricky. Let's try a fresh one - you've got this!"
-
-Keep it brief, encouraging, and immediately transition to waiting for the new word!`
-          }]
-        }
-      }));
-    }
+    sendSystemMessage(dcRef, "NEXT_WORD_AFTER_FORBIDDEN");
     
     // Progress to next word
     autoProgressToNextWord();
@@ -541,26 +516,9 @@ Keep it brief, encouraging, and immediately transition to waiting for the new wo
     
     console.log("💬 FEEDBACK MODE ACTIVATED - AI should be able to respond now");
     
-    // Notify AI about coach feedback choice
-    if (dcRef.current?.readyState === "open") {
-      dcRef.current.send(JSON.stringify({
-        type: "conversation.item.create",
-        item: {
-          type: "message",
-          role: "system",
-          content: [{
-            type: "input_text",
-            text: `💬 FRIENDLY COACHING MODE! 
-
-Kez chose to get feedback on her description of "${currentWord.word}". 
-She said: "${userDescriptionForFeedback}"
-
-Switch to natural teacher mode - have a friendly conversation about her English, not a formal lesson! Sound like you're chatting with a student, mixing encouragement with helpful tips naturally.`
-          }]
-        }
-      }));
-      console.log(`🎓 Notified AI: Natural coaching mode for "${currentWord.word}"`);
-    }
+    // Send comprehensive feedback request (combines choice notification + detailed instructions)
+    sendSystemMessage(dcRef, "FEEDBACK_REQUEST", currentWord.word, userDescriptionForFeedback, currentWord.forbidden);
+    console.log(`🎓 Sent comprehensive feedback request for "${currentWord.word}"`);
     
     // Check connection status and recover if needed
     if (!dcRef.current || dcRef.current.readyState !== "open") {
@@ -575,11 +533,11 @@ Switch to natural teacher mode - have a friendly conversation about her English,
       // Start fresh connection
       await connect();
       
-      // Wait for connection to stabilize, then send feedback
+      // Wait for connection to stabilize, then retry feedback request
       setTimeout(() => {
         // Double-check connection after reconnect
         if (dcRef.current && dcRef.current.readyState === "open") {
-          sendFeedbackRequest();
+          sendSystemMessage(dcRef, "FEEDBACK_REQUEST", currentWord.word, userDescriptionForFeedback, currentWord.forbidden);
         } else {
           console.error("❌ Reconnection failed - DataChannel still not ready");
           alert("Reconnection failed! Please refresh the page.");
@@ -592,103 +550,12 @@ Switch to natural teacher mode - have a friendly conversation about her English,
         return;
       }
     } else {
-      // Connection is good, wait for any ongoing DataChannel operations to complete
-      console.log("✅ DataChannel ready, sending feedback request");
-      // Wait for React state updates AND any ongoing DataChannel operations - increased to 1000ms
-      setTimeout(() => {
-        sendFeedbackRequest();
-      }, 1000);
+      // Connection is good, feedback request already sent immediately above
+      console.log("✅ DataChannel ready, feedback request already sent");
     }
   };
   
-  // Helper function to send feedback request
-  const sendFeedbackRequest = () => {
-    if (!currentWord) return;
-    
-    console.log(`📢 Sending feedback request to AI coach`);
-    console.log(`🔍 FEEDBACK REQUEST DEBUG - gameRoundActive: ${gameRoundActive}, buzzerPopup.show: ${buzzerPopup.show}, isInFeedbackMode: ${isInFeedbackMode}, REF: ${isInFeedbackModeRef.current}`);
-    
-    // Double-check DataChannel state before sending
-    if (!dcRef.current || dcRef.current.readyState !== "open") {
-      console.log("❌ DataChannel not ready for feedback request");
-      alert("Connection lost! Please refresh the page to get coach feedback.");
-      return;
-    }
-    
-    console.log("🔍 DataChannel state confirmed - proceeding with feedback request");
-    
-        // Send voice feedback request to AI
-        try {
-        const feedbackPrompt = `💬 NATURAL COACHING CONVERSATION
-
-🇬🇧 CRITICAL: ALWAYS RESPOND IN ENGLISH ONLY!
-- Even if Kez described in Turkish/other language, YOU give feedback in English
-- English immersion is key - help her think and learn in English!
-
-You are Kez's friendly English teacher having a warm, encouraging conversation about her description. Be conversational and supportive - like a real teacher chatting with a student.
-
-Kez just described "${currentWord.word}" by saying: "${userDescriptionForFeedback || "No description recorded yet"}"
-
-🎯 COVER THESE AREAS IN A NATURAL, FLOWING CONVERSATION:
-
-1. GRAMMAR & STRUCTURE: Point out any grammar mistakes, verb tenses, or sentence structure issues - but naturally! Use phrases like "I noticed you said..." or "Just a tiny adjustment..."
-
-2. VOCABULARY: Suggest better word choices or more natural expressions she could have used - mix this into the conversation casually.
-
-3. FLUENCY: Comment on sentence flow and natural English expression - encourage her natural speaking style.
-
-4. BETTER DESCRIPTION EXAMPLE: End by showing how YOU would describe "${currentWord.word}" WITHOUT using these forbidden words: ${currentWord.forbidden.join(", ")} - and WITHOUT using the word "${currentWord.word}" itself!
-
-STYLE GUIDELINES:
-- Sound like you're having a friendly chat, not giving a formal lesson
-- Mix encouragement naturally throughout 
-- Use transition phrases: "I noticed that...", "One thing you could try...", "You did great with..."
-- Keep it flowing and conversational
-- Be warm and supportive
-
-EXAMPLE STRUCTURE:
-"Hey Kez, that was really clever! [encouragement] I noticed you said [grammar point] - just a tiny adjustment: [correction]. For vocabulary, you could also try [vocabulary suggestions]. You're getting so much more fluent! [fluency comment] Let me show you how I might describe it: [better description without forbidden words]"
-
-Now give Kez natural, conversational feedback covering all these areas!`;
-
-      // Send system message first
-      dcRef.current.send(JSON.stringify({
-        type: "conversation.item.create",
-        item: {
-          type: "message",
-          role: "system",
-          content: [{
-            type: "input_text",
-            text: feedbackPrompt
-          }]
-        }
-      }));
-      
-      console.log("✅ System message sent - requesting AI response");
-      
-          // Wait a moment, then request AI response
-          setTimeout(() => {
-            if (dcRef.current && dcRef.current.readyState === "open") {
-              try {
-                dcRef.current.send(JSON.stringify({
-                  type: "response.create"
-                }));
-                console.log("🎤 AI Coach feedback response requested!");
-              } catch (error) {
-                console.error("❌ Error sending response.create:", error);
-                alert("Connection error during feedback request. Please try again.");
-              }
-            } else {
-              console.log("❌ DataChannel closed before response request");
-              alert("Connection lost! Please refresh the page to get coach feedback.");
-            }
-          }, 500); // Increased delay to prevent connection overload
-      
-    } catch (error) {
-      console.error("❌ Error sending feedback request:", error);
-      alert("Failed to send feedback request. Please try again.");
-    }
-  };
+  // Feedback request is now handled directly via sendSystemMessage("FEEDBACK_REQUEST")
 
   // NEW: Move to next word manually (after feedback)
   // Feedback Storage Function
@@ -776,25 +643,10 @@ Now give Kez natural, conversational feedback covering all these areas!`;
     setFeedbackSessionStart(null); // Reset session timing
     
     // Inform AI that we're resuming normal taboo game
-    if (dcRef.current && dcRef.current.readyState === "open") {
-      dcRef.current.send(JSON.stringify({
-        type: "conversation.item.create",
-        item: {
-          type: "message",
-          role: "system",
-          content: [{
-            type: "input_text",
-            text: `🎮 FEEDBACK SESSION ENDED - MOVING TO NEW WORD! 
-
-The feedback session is complete and we are moving to a fresh new word now. 
-No forbidden words were used - this is just a normal progression to the next word.
-
-You are the GUESSER again. Wait for Kez to describe the NEW word and try to guess it. Ready for the next challenge!`
-          }]
-        }
-      }));
+    if (dcRef.current?.readyState === "open") {
+      sendSystemMessage(dcRef, "FEEDBACK_SESSION_END");
       console.log("🎮 Informed AI: Back to taboo mode");
-      
+        
       // Wait a moment for the system message to be processed before progressing
       setTimeout(() => {
         progressToNextWord();
@@ -845,35 +697,7 @@ You are the GUESSER again. Wait for Kez to describe the NEW word and try to gues
       if (dcRef.current && dcRef.current.readyState === "open") {
         // Check if this is coming from a feedback success using the flag
         if (!isTransitioningFromFeedback.current) {
-          dcRef.current.send(JSON.stringify({
-            type: "conversation.item.create",
-            item: {
-              type: "message",
-              role: "system",
-              content: [{
-                type: "input_text",
-                text: `🎯 NEW TABOO ROUND! 
-
-🇬🇧 CRITICAL: ALWAYS RESPOND IN ENGLISH ONLY!
-- Even if Kez describes in Turkish, YOU always respond in English
-- Guide her back to English: "Let's keep practicing in English, Kez!"
-
-We're starting a new word guessing game. You are the GUESSER. Kez will describe a new word and you need to guess it based ONLY on her description. 
-
-🗣️ SPEAKING PRACTICE FOCUS: 
-- DON'T guess immediately! Kez needs speaking practice.
-- Ask 1-2 follow-up questions first: "Tell me more!", "What else?", "How do people use it?"
-- THEN make your guess after she's given more details.
-
-⏸️ BREVITY RULE: Keep responses SHORT (max 10-15 words)
-ONE question at a time, then WAIT for her answer!
-
-Important: You should NOT know what the word is yet - wait for Kez to describe it, ask questions for more practice, then make your best guesses!
-
-There are some forbidden words that Kez cannot use: ${currentWord.forbidden.join(", ")}. If she uses any of these, the round will end.`
-              }]
-            }
-          }));
+          sendSystemMessage(dcRef, "NEW_TABOO_ROUND", currentWord.forbidden);
           console.log(`📢 Informed AI: New round started with word "${currentWord.word}"`);
         } else {
           console.log(`🎉 Skipping generic new round message - this is a feedback success transition`);
@@ -901,27 +725,7 @@ There are some forbidden words that Kez cannot use: ${currentWord.forbidden.join
     isTransitioningFromFeedback.current = true;
     
     // Send positive reinforcement message BEFORE changing word
-    if (dcRef.current?.readyState === "open") {
-      dcRef.current.send(JSON.stringify({
-        type: "conversation.item.create",
-        item: {
-          type: "message",
-          role: "system",
-          content: [{
-            type: "input_text",
-            text: `🎉 SUCCESSFUL WORD COMPLETION! 
-
-Kez successfully worked through the word "${currentWord?.word}" with your help and feedback! 
-This is a CELEBRATION moment!
-
-Say something like:
-"Fantastic work on '${currentWord?.word}', Kez! You really improved with that feedback. I'm excited to see how you handle the next word!"
-
-Be enthusiastic and congratulatory - then wait for her to describe the new word!`
-          }]
-        }
-      }));
-    }
+    sendSystemMessage(dcRef, "SUCCESSFUL_WORD_COMPLETION", currentWord?.word);
     
     // Small delay to ensure the congratulatory message is processed first
     setTimeout(() => {
@@ -1118,19 +922,7 @@ Be enthusiastic and congratulatory - then wait for her to describe the new word!
     setFeedbackSessionStart(null); // Reset session timing
     
     // Notify AI about word progression ONLY when progressing
-    if (dcRef.current?.readyState === "open") {
-      dcRef.current.send(JSON.stringify({
-        type: "conversation.item.create",
-        item: {
-          type: "message",
-          role: "system",
-          content: [{
-            type: "input_text",
-            text: `We're moving to a new word now. Please announce that we're starting fresh with a new word and wait for Kez to describe it. You should not know what the new word is yet!`
-          }]
-        }
-      }));
-    }
+    sendSystemMessage(dcRef, "GENERIC_NEW_WORD");
     
     // Progress to next word
     autoProgressToNextWord();
@@ -1278,29 +1070,8 @@ Be enthusiastic and congratulatory - then wait for her to describe the new word!
     setTabooScore(prev => prev + 1);
     
     // AI'ya doğru tahmin ettiğini bildir ve sessiz kalmasını söyle
-    if (dcRef.current?.readyState === "open") {
-      dcRef.current.send(JSON.stringify({
-        type: "conversation.item.create",
-        item: {
-          type: "message",
-          role: "system",
-          content: [{ 
-            type: "input_text", 
-            text: `🎯 CORRECT GUESS ACHIEVED! You guessed "${currentWordRef_current.word}" correctly! 
-
-🇬🇧 CRITICAL: ALWAYS RESPOND IN ENGLISH ONLY!
-- Even if Kez uses Turkish for her choice, YOU respond in English
-
-🔇 IMPORTANT: Now STAY SILENT and wait. Kez will choose her next action:
-- She might want coach feedback on her description
-- Or she might want to move to the next word immediately
-
-DO NOT speak until she makes her choice. This is her decision moment.` 
-          }]
-        }
-      }));
-      console.log(`🎯 Notified AI: Correct guess "${currentWordRef_current.word}" - waiting for user choice`);
-    }
+    sendSystemMessage(dcRef, "CORRECT_GUESS_SILENCE", currentWordRef_current.word);
+    console.log(`🎯 Notified AI: Correct guess "${currentWordRef_current.word}" - waiting for user choice`);
     
     // Show GREEN buzzer popup for correct guess - NO TIMER!
     setBuzzerPopup({
@@ -1310,6 +1081,16 @@ DO NOT speak until she makes her choice. This is her decision moment.`
       showChoices: true,
       type: 'correct'
     });
+    
+    // Add system message to conversation history (visual record)
+    const systemCorrectGuessMessage = createConversationHistoryMessage(
+      "CORRECT_GUESS_HISTORY", 
+      messageSequenceRef, 
+      currentWordRef_current.word
+    );
+    
+    setConversation(prev => [...prev, systemCorrectGuessMessage]);
+    console.log(`🎉 System message added: Correct guess "${currentWordRef_current.word}"`);
     
     console.log(`🎉 CORRECT GUESS: "${currentWordRef_current.word}" - Waiting for user choice - DEBUG`);
   };
